@@ -1,8 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function AuthPage() {
+function SignInForm() {
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -16,6 +19,8 @@ export default function AuthPage() {
     if (error) { setErr(error.message); setLoading(false); }
   }
 
+  const displayError = err || urlError;
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", background: "var(--bg)" }}>
       <div style={{ width: "100%", maxWidth: "360px" }}>
@@ -26,9 +31,9 @@ export default function AuthPage() {
           Continue with Google to access your profile, predictions, and tracker.
         </p>
 
-        {err && (
+        {displayError && (
           <div style={{ marginBottom: "16px", padding: "12px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
-            <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{err}</p>
+            <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{displayError}</p>
           </div>
         )}
 
@@ -57,5 +62,13 @@ export default function AuthPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense>
+      <SignInForm />
+    </Suspense>
   );
 }
