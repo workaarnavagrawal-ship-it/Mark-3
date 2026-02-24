@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import Link from "next/link";
+import { LandingNav } from "@/components/LandingNav";
 
 export default async function LandingPage({ searchParams }: { searchParams: { code?: string; token_hash?: string; type?: string } }) {
   if (searchParams.code) redirect(`/auth/callback?code=${searchParams.code}`);
@@ -13,10 +13,7 @@ export default async function LandingPage({ searchParams }: { searchParams: { co
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
       {/* Nav */}
-      <nav style={{ padding: "28px 48px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--b)" }}>
-        <span className="serif" style={{ fontSize: "22px", fontWeight: 400, fontStyle: "italic", letterSpacing: "-0.02em", color: "var(--t)" }}>offr</span>
-        <Link href="/auth" style={{ fontSize: "13px", color: "var(--t3)", textDecoration: "none", transition: "color 150ms" }}>Sign in →</Link>
-      </nav>
+      <LandingNav />
 
       {/* Hero */}
       <main style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 24px" }}>
