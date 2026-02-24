@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #000000;
+  --s1: #0B0B0C;
+  --s2: #0E0E10;
+  --s3: #121216;
+  --s-hov: #16161A;
+  --b: #1F1F22;
+  --b-strong: #2A2A2F;
+  --t: #F4F1E8;
+  --t2: #B9B6AE;
+  --t3: #6E6C66;
+  --t-inv: #1A1815;
+  --acc: #E8DFC8;
+  --acc-h: #EFE7D3;
+  --safe-bg: #163018; --safe-t: #BFE8C7; --safe-b: #284A2E;
+  --tgt-bg: #2B210E;  --tgt-t:  #F2D39A;  --tgt-b:  #4A3715;
+  --rch-bg: #2A1212;  --rch-t:  #F2B1B1;  --rch-b:  #4A2222;
+  --gl-dark: rgba(18,18,22,0.55);
+  --gl-dark-b: rgba(255,255,255,0.08);
+  --gl-parch: rgba(232,223,200,0.10);
+  --gl-parch-b: rgba(232,223,200,0.18);
+  --serif: 'EB Garamond', 'Apple Garamond', Georgia, serif;
+  --sans: 'DM Sans', system-ui, sans-serif;
+  --r: 16px;
+  --ri: 12px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--t);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: rgba(232,223,200,0.15); }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--b); border-radius: 9999px; }
+*:focus-visible { outline: 1.5px solid rgba(232,223,200,0.35); outline-offset: 2px; border-radius: 4px; }
+
+.serif { font-family: var(--serif) !important; }
+
+.glass-dark {
+  background: var(--gl-dark);
+  border: 1px solid var(--gl-dark-b);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+.glass-parch {
+  background: var(--gl-parch);
+  border: 1px solid var(--gl-parch-b);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.card {
+  background: var(--s1);
+  border: 1px solid var(--b);
+  border-radius: var(--r);
+  padding: 24px;
+}
+.card-hover {
+  transition: border-color 150ms ease, background 150ms ease;
+  cursor: pointer;
+}
+.card-hover:hover {
+  border-color: var(--b-strong);
+  background: var(--s2);
+}
+
+.inp {
+  width: 100%;
+  background: var(--s2);
+  border: 1px solid var(--b);
+  border-radius: var(--ri);
+  padding: 11px 14px;
+  font-size: 14px;
+  color: var(--t);
+  font-family: var(--sans);
+  outline: none;
+  transition: border-color 150ms;
+  -webkit-appearance: none;
+}
+.inp:focus { border-color: var(--b-strong); }
+.inp::placeholder { color: var(--t3); }
+.inp option { background: var(--s2); color: var(--t); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--ri);
+  padding: 11px 22px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms ease;
+  font-family: var(--sans);
+  border: none;
+  white-space: nowrap;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-prim { background: var(--acc); color: var(--t-inv); }
+.btn-prim:hover:not(:disabled) { background: var(--acc-h); transform: translateY(-1px); }
+.btn-prim:active:not(:disabled) { transform: translateY(0); }
+.btn-ghost { background: transparent; color: var(--t3); border: 1px solid var(--b); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--b-strong); color: var(--t2); }
+
+.label {
+  font-size: 11px;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  display: block;
+  margin-bottom: 8px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 3px 11px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+.pill-safe   { background: var(--safe-bg); color: var(--safe-t); border: 1px solid var(--safe-b); }
+.pill-target { background: var(--tgt-bg);  color: var(--tgt-t);  border: 1px solid var(--tgt-b); }
+.pill-reach  { background: var(--rch-bg);  color: var(--rch-t);  border: 1px solid var(--rch-b); }
+
+.tog {
+  padding: 9px 18px;
+  border-radius: var(--ri);
+  border: 1px solid var(--b);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 150ms;
+  background: transparent;
+  color: var(--t3);
+  font-family: var(--sans);
+}
+.tog:hover { border-color: var(--b-strong); color: var(--t2); }
+.tog-active { background: var(--acc); color: var(--t-inv); border-color: var(--acc); font-weight: 500; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+@keyframes fade-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+.fade-in { animation: fade-in 250ms ease forwards; }
