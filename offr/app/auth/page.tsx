@@ -13,14 +13,23 @@ function SignInForm() {
     setErr(""); setLoading(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOAuth({
+      // skipBrowserRedirect lets us validate the URL before navigating
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback` },
+        options: {
+          redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback`,
+          skipBrowserRedirect: true,
+        },
       });
-      if (error) { setErr(error.message); setLoading(false); }
-      // On success signInWithOAuth redirects the browser automatically
+      if (error) { setErr(error.message); setLoading(false); return; }
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        setErr("No OAuth URL returned — check Supabase project settings");
+        setLoading(false);
+      }
     } catch (e: any) {
-      setErr(e?.message ?? "Configuration error — Supabase environment variables may be missing");
+      setErr(e?.message ?? "Configuration error — check Supabase environment variables");
       setLoading(false);
     }
   }
