@@ -11,12 +11,18 @@ function SignInForm() {
 
   async function go() {
     setErr(""); setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback` },
-    });
-    if (error) { setErr(error.message); setLoading(false); }
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback` },
+      });
+      if (error) { setErr(error.message); setLoading(false); }
+      // On success signInWithOAuth redirects the browser automatically
+    } catch (e: any) {
+      setErr(e?.message ?? "Configuration error — Supabase environment variables may be missing");
+      setLoading(false);
+    }
   }
 
   const displayError = err || urlError;
