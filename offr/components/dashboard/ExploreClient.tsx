@@ -186,6 +186,30 @@ export function ExploreClient({ interests }: ExploreClientProps) {
         </div>
       )}
 
+      {/* Interests set but no courses matched → soft message */}
+      {!loading && !err && interests.length > 0 && hiddenGems.length === 0 && courses.length > 0 && (
+        <div
+          style={{
+            marginBottom: "28px",
+            padding: "14px 18px",
+            background: "var(--s2)",
+            border: "1px solid var(--b)",
+            borderRadius: "var(--r)",
+            fontSize: "13px",
+            color: "var(--t3)",
+          }}
+        >
+          No hidden gems found for your current interests. Try updating them in your{" "}
+          <Link
+            href="/dashboard/profile"
+            style={{ color: "var(--t)", textDecoration: "none", borderBottom: "1px solid var(--b-strong)" }}
+          >
+            profile
+          </Link>
+          , or explore all courses below.
+        </div>
+      )}
+
       {/* No interests → gem nudge */}
       {!loading && !err && interests.length === 0 && (
         <div
@@ -283,9 +307,29 @@ export function ExploreClient({ interests }: ExploreClientProps) {
             background: "var(--rch-bg)",
             border: "1px solid var(--rch-b)",
             borderRadius: "var(--r)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
           }}
         >
           <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{shortlistErr}</p>
+          <button
+            onClick={() => setShortlistErr("")}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--rch-t)",
+              fontSize: "16px",
+              lineHeight: 1,
+              padding: "0 2px",
+              flexShrink: 0,
+            }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
         </div>
       )}
 

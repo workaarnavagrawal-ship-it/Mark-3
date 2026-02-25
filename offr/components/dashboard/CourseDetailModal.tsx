@@ -212,6 +212,11 @@ export function CourseDetailModal({
                 >
                   Universities offering this course
                 </p>
+                {detail.offerings.length === 0 ? (
+                  <p style={{ fontSize: "13px", color: "var(--t3)" }}>
+                    No offering details available.
+                  </p>
+                ) : (
                 <div
                   style={{
                     display: "flex",
@@ -277,6 +282,7 @@ export function CourseDetailModal({
                     </div>
                   ))}
                 </div>
+                )}
               </div>
 
               {/* Entry hint */}
