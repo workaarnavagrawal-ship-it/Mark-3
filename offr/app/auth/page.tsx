@@ -3,7 +3,6 @@ import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 
-// Create ONE client instance outside the component so it's stable
 function getSupabase() {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,15 +24,12 @@ function AuthInner() {
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
-        // This ensures PKCE verifier is stored in cookies, not localStorage
-        skipBrowserRedirect: false,
       },
     });
     if (error) {
       setErr(error.message);
       setLoading(false);
     }
-    // If no error, browser will redirect to Google — don't reset loading
   }
 
   const displayError = err || (callbackError ? decodeURIComponent(callbackError) : "");
@@ -44,32 +40,26 @@ function AuthInner() {
         <a href="/" className="serif" style={{ display: "block", fontSize: "22px", fontWeight: 400, fontStyle: "italic", color: "var(--t)", textDecoration: "none", marginBottom: "56px" }}>offr</a>
 
         <h1 className="serif" style={{ fontSize: "38px", fontWeight: 400, letterSpacing: "-0.025em", color: "var(--t)", marginBottom: "10px" }}>Sign in</h1>
-        <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "40px", lineHeight: 1.65 }}>
+        <p style={{ fontSize: "14px", color: "#6E6C66", marginBottom: "40px", lineHeight: 1.65 }}>
           Continue with Google to access your profile, predictions, and tracker.
         </p>
 
         {displayError && (
-          <div style={{ marginBottom: "20px", padding: "12px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
-            <p style={{ fontSize: "11px", color: "var(--t3)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Error</p>
-            <p style={{ fontSize: "13px", color: "var(--rch-t)", lineHeight: 1.5 }}>{displayError}</p>
+          <div style={{ marginBottom: "20px", padding: "12px 16px", background: "#2A1212", border: "1px solid #4A2222", borderRadius: "10px" }}>
+            <p style={{ fontSize: "11px", color: "#6E6C66", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Error</p>
+            <p style={{ fontSize: "13px", color: "#F2B1B1", lineHeight: 1.5 }}>{displayError}</p>
           </div>
         )}
 
-        <button
-          onClick={go}
-          disabled={loading}
-          style={{
-            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px",
-            padding: "14px 20px", background: "var(--s2)", border: "1px solid var(--b-strong)",
-            borderRadius: "var(--ri)", color: "var(--t)", fontSize: "14px", fontWeight: 500,
-            cursor: loading ? "not-allowed" : "pointer", transition: "all 150ms",
-            fontFamily: "var(--font-dm, var(--sans))", opacity: loading ? 0.6 : 1,
-          }}
-          onMouseEnter={e => { if (!loading) (e.currentTarget as HTMLElement).style.borderColor = "var(--acc)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; }}
-        >
+        <button onClick={go} disabled={loading} style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px",
+          padding: "14px 20px", background: "#0E0E10", border: "1px solid #2A2A2F",
+          borderRadius: "12px", color: "#F4F1E8", fontSize: "14px", fontWeight: 500,
+          cursor: loading ? "not-allowed" : "pointer", transition: "all 150ms",
+          fontFamily: "system-ui, sans-serif", opacity: loading ? 0.6 : 1,
+        }}>
           {loading ? (
-            <span style={{ width: "16px", height: "16px", border: "1.5px solid var(--b-strong)", borderTopColor: "var(--t2)", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
+            <span style={{ width: "16px", height: "16px", border: "1.5px solid #2A2A2F", borderTopColor: "#B9B6AE", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
           ) : (
             <svg width="18" height="18" viewBox="0 0 24 24" style={{ flexShrink: 0 }}>
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -81,7 +71,7 @@ function AuthInner() {
           {loading ? "Redirecting to Google…" : "Continue with Google"}
         </button>
 
-        <p style={{ marginTop: "20px", fontSize: "12px", color: "var(--t3)", textAlign: "center", lineHeight: 1.6 }}>
+        <p style={{ marginTop: "20px", fontSize: "12px", color: "#6E6C66", textAlign: "center", lineHeight: 1.6 }}>
           Your data is private. Only you can see your profile.
         </p>
       </div>
@@ -90,9 +80,5 @@ function AuthInner() {
 }
 
 export default function AuthPage() {
-  return (
-    <Suspense>
-      <AuthInner />
-    </Suspense>
-  );
+  return <Suspense><AuthInner /></Suspense>;
 }
