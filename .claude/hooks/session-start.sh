@@ -15,6 +15,11 @@ npm install
 echo "==> Installing Python dependencies..."
 pip install -q fastapi uvicorn pandas pydantic google-genai
 
+echo "==> Starting FastAPI backend on port 8000..."
+cd "$APP_DIR"
+nohup uvicorn api.index:app --host 0.0.0.0 --port 8000 > /tmp/fastapi.log 2>&1 &
+echo "FastAPI PID: $!"
+
 echo "==> Starting Next.js dev server on port 3000..."
 nohup npm run dev -- --port 3000 > /tmp/next-dev.log 2>&1 &
 echo "Dev server PID: $!"

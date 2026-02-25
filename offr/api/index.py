@@ -118,10 +118,13 @@ def apply_ps_score(
 # ─────────────────────────────────────────────────────────────
 
 def _try_import_genai():
+    # Use BaseException (not just Exception) to catch Rust/PyO3 panics
+    # (pyo3_runtime.PanicException) that can occur when the system
+    # `cryptography` package has native-extension issues.
     try:
         from google import genai  # type: ignore
         return genai
-    except Exception:
+    except BaseException:
         return None
 
 
@@ -130,15 +133,17 @@ def gemini_model_name() -> str:
 
 
 def gemini_client():
-    genai = _try_import_genai()
-    if genai is None:
-        return None
+    # Skip the import entirely when no key is configured — avoids triggering
+    # cryptography/Rust init in environments where it would panic.
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return None
+    genai = _try_import_genai()
+    if genai is None:
+        return None
     try:
         return genai.Client(api_key=api_key)
-    except Exception:
+    except BaseException:
         return None
 
 
@@ -1602,6 +1607,11 @@ async def analyse_ps(request: Request):
         return JSONResponse({"error": "lines must be a non-empty array"}, status_code=400)
 
     result, err = run_standalone_ps_analysis(statement, lines, ps_format)
-    if err:
-        return JSONResponse({"error": err}, status_code=500)
+    # `run_standalone_ps_analysis` returns a valid fallback result even when
+    # Gemini fails — only return 500 when there is genuinely no result at all.
+    if result is None:
+        return JSONResponse(
+            {"error": err or "Analysis failed"},
+            status_code=500,
+        )
     return JSONResponse(result)
