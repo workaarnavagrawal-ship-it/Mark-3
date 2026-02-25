@@ -69,9 +69,8 @@ export function ExploreClient({ interests }: { interests: string[] }) {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
                   {c.unis.slice(0,3).map(u => <span key={u} style={{ fontSize: "11px", color: "var(--t3)", border: "1px solid var(--b)", borderRadius: "9999px", padding: "2px 9px" }}>{u}</span>)}
                 </div>
-                <Link href={`/dashboard/assess?query=${encodeURIComponent(c.full)}`} style={{ fontSize: "12px", color: "var(--t3)", textDecoration: "none", transition: "color 150ms" }}
-                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "var(--t)"}
-                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "var(--t3)"}>
+                <Link href={`/dashboard/assess?query=${encodeURIComponent(c.full)}`}
+                  className="link-chances-text" style={{ fontSize: "12px" }}>
                   Check my chances →
                 </Link>
               </div>
@@ -129,9 +128,8 @@ export function ExploreClient({ interests }: { interests: string[] }) {
               <div style={{ marginTop: "14px", display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" }}>
                 {c.unis.map(u => <span key={u} style={{ fontSize: "11px", color: "var(--t3)", border: "1px solid var(--b)", borderRadius: "9999px", padding: "2px 9px" }}>{u}</span>)}
                 <Link href={`/dashboard/assess?query=${encodeURIComponent(c.full)}`}
-                  style={{ marginLeft: "auto", fontSize: "12px", color: "var(--t3)", border: "1px solid var(--b)", borderRadius: "9999px", padding: "4px 12px", textDecoration: "none", transition: "all 150ms" }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; (e.currentTarget as HTMLElement).style.color = "var(--t)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; }}>
+                  className="link-chances-pill"
+                  style={{ marginLeft: "auto", fontSize: "12px", borderStyle: "solid", borderWidth: "1px", borderRadius: "9999px", padding: "4px 12px" }}>
                   Check my chances →
                 </Link>
               </div>

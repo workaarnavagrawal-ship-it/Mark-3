@@ -111,9 +111,8 @@ export function TrackerClient({ initialAssessments }: { initialAssessments: Trac
           })}
 
           {entries.length < 5 && (
-            <Link href="/dashboard/assess" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "18px", border: "1px dashed var(--b)", borderRadius: "var(--r)", color: "var(--t3)", fontSize: "13px", textDecoration: "none", transition: "all 150ms" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; (e.currentTarget as HTMLElement).style.color = "var(--t2)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; }}>
+            <Link href="/dashboard/assess" className="link-dashed-add"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "18px", borderStyle: "dashed", borderWidth: "1px", borderRadius: "var(--r)", fontSize: "13px" }}>
               + Add another choice ({5 - entries.length} remaining)
             </Link>
           )}

@@ -75,6 +75,16 @@ html, body {
   border-color: var(--b-strong);
   background: var(--s2);
 }
+/* Clickable link cards — use instead of onMouseEnter/onMouseLeave on <Link> */
+.link-card {
+  background: var(--s1);
+  border: 1px solid var(--b);
+  transition: border-color 150ms, background 150ms;
+}
+.link-card:hover {
+  border-color: var(--b-strong);
+  background: var(--s2);
+}
 
 .inp {
   width: 100%;
@@ -147,6 +157,57 @@ html, body {
   font-family: var(--sans);
 }
 .tog:hover { border-color: var(--b-strong); color: var(--t2); }
+
+/* Sidebar nav links */
+.nav-link {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 10px;
+  color: var(--t3);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 400;
+  transition: background 150ms, color 150ms;
+}
+.nav-link:hover {
+  background: var(--s3);
+  color: var(--t2);
+}
+.nav-link.nav-active {
+  background: var(--acc);
+  color: var(--t-inv);
+  font-weight: 500;
+}
+.nav-link.nav-active:hover {
+  background: var(--acc);
+  color: var(--t-inv);
+}
+
+/* Dashed "add choice" link used in Strategy + Tracker */
+.link-dashed-add {
+  border-color: var(--b);
+  color: var(--t3);
+  text-decoration: none;
+  transition: all 150ms;
+}
+.link-dashed-add:hover { border-color: var(--b-strong); color: var(--t2); }
+
+/* "Check my chances →" text link in Explore suggested cards */
+.link-chances-text {
+  color: var(--t3);
+  text-decoration: none;
+  transition: color 150ms;
+}
+.link-chances-text:hover { color: var(--t); }
+
+/* "Check my chances →" pill link in Explore course list */
+.link-chances-pill {
+  border-color: var(--b);
+  color: var(--t3);
+  text-decoration: none;
+  transition: all 150ms;
+}
+.link-chances-pill:hover { border-color: var(--b-strong); color: var(--t); }
 .tog-active { background: var(--acc); color: var(--t-inv); border-color: var(--acc); font-weight: 500; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
