@@ -85,7 +85,7 @@ export default function OnboardingPage() {
           <div className="fade-in">
             <p className="label">Step 1 of {TOTAL}</p>
             <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "10px" }}>What do you need?</h1>
-            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "32px", lineHeight: 1.65 }}>We'll shape your experience around this.</p>
+            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "32px", lineHeight: 1.65 }}>We&apos;ll shape your experience around this.</p>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               {([
                 { id: "explorer" as Persona, label: "I'm exploring", sub: "Interests but no course in mind yet" },
@@ -109,7 +109,7 @@ export default function OnboardingPage() {
         {step === 2 && (
           <div className="fade-in">
             <p className="label">Step 2 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "32px" }}>What's your name?</h1>
+            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "32px" }}>What&apos;s your name?</h1>
             <input className="inp" placeholder="First name" value={name} onChange={e => setName(e.target.value)} autoFocus
               onKeyDown={e => e.key === "Enter" && name.trim() && setStep(3)} />
           </div>

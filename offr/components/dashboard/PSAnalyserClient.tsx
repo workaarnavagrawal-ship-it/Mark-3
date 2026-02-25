@@ -154,7 +154,7 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
                       <ScoreDots score={lf.score} />
                     </div>
                     <p style={{ fontSize: "12px", color: "var(--t2)", lineHeight: 1.6, borderLeft: `2px solid ${vs.border}`, paddingLeft: "10px", fontStyle: "italic", marginBottom: isActive ? "12px" : 0 }}>
-                      "{lf.line.length > 110 ? lf.line.slice(0,110)+"…" : lf.line}"
+                      &ldquo;{lf.line.length > 110 ? lf.line.slice(0,110)+"…" : lf.line}&rdquo;
                     </p>
                     {isActive && (
                       <div style={{ borderTop: "1px solid var(--b)", paddingTop: "12px" }}>

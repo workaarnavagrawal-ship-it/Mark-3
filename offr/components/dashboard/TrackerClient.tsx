@@ -54,7 +54,7 @@ export function TrackerClient({ initialAssessments }: { initialAssessments: Trac
       {entries.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: "56px 32px", borderStyle: "dashed" }}>
           <h3 className="serif" style={{ fontSize: "22px", fontWeight: 400, color: "var(--t)", marginBottom: "10px" }}>No choices saved yet</h3>
-          <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Run an assessment and it'll appear here automatically.</p>
+          <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Run an assessment and it&apos;ll appear here automatically.</p>
           <Link href="/dashboard/assess" className="btn btn-prim">Check offer chances →</Link>
         </div>
       ) : (
