@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 export async function GET(request: Request) {
@@ -8,16 +8,13 @@ export async function GET(request: Request) {
   const error = requestUrl.searchParams.get("error");
   const errorDescription = requestUrl.searchParams.get("error_description");
 
-  // Google returned an error (user denied, misconfigured OAuth, etc.)
   if (error) {
-    console.error("OAuth error:", error, errorDescription);
     return NextResponse.redirect(
       `${requestUrl.origin}/auth?error=${encodeURIComponent(errorDescription || error)}`
     );
   }
 
   if (!code) {
-    // No code — something went wrong upstream
     return NextResponse.redirect(`${requestUrl.origin}/auth?error=no_code`);
   }
 
@@ -31,7 +28,7 @@ export async function GET(request: Request) {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
           });
@@ -43,13 +40,11 @@ export async function GET(request: Request) {
   const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
   if (exchangeError) {
-    console.error("exchangeCodeForSession error:", exchangeError.message);
     return NextResponse.redirect(
       `${requestUrl.origin}/auth?error=${encodeURIComponent(exchangeError.message)}`
     );
   }
 
-  // Session established — figure out where to send them
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -60,7 +55,7 @@ export async function GET(request: Request) {
     .from("profiles")
     .select("id")
     .eq("user_id", user.id)
-    .maybeSingle(); // maybeSingle won't throw if row missing
+    .maybeSingle();
 
   const destination = profile ? "/dashboard" : "/onboarding";
   return NextResponse.redirect(`${requestUrl.origin}${destination}`);
