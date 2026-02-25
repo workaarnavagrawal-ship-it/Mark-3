@@ -182,6 +182,32 @@ html, body {
   background: var(--acc);
   color: var(--t-inv);
 }
+
+/* Dashed "add choice" link used in Strategy + Tracker */
+.link-dashed-add {
+  border-color: var(--b);
+  color: var(--t3);
+  text-decoration: none;
+  transition: all 150ms;
+}
+.link-dashed-add:hover { border-color: var(--b-strong); color: var(--t2); }
+
+/* "Check my chances →" text link in Explore suggested cards */
+.link-chances-text {
+  color: var(--t3);
+  text-decoration: none;
+  transition: color 150ms;
+}
+.link-chances-text:hover { color: var(--t); }
+
+/* "Check my chances →" pill link in Explore course list */
+.link-chances-pill {
+  border-color: var(--b);
+  color: var(--t3);
+  text-decoration: none;
+  transition: all 150ms;
+}
+.link-chances-pill:hover { border-color: var(--b-strong); color: var(--t); }
 .tog-active { background: var(--acc); color: var(--t-inv); border-color: var(--acc); font-weight: 500; }
 
 @keyframes spin { to { transform: rotate(360deg); } }

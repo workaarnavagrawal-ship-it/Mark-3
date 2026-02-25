@@ -153,9 +153,8 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
                   );
                 })}
                 {assessments.length < 5 && (
-                  <Link href="/dashboard/assess" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "14px", border: "1px dashed var(--b)", borderRadius: "10px", color: "var(--t3)", fontSize: "13px", textDecoration: "none", marginTop: "6px", transition: "all 150ms" }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; (e.currentTarget as HTMLElement).style.color = "var(--t2)"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; }}>
+                  <Link href="/dashboard/assess" className="link-dashed-add"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "14px", borderStyle: "dashed", borderWidth: "1px", borderRadius: "10px", fontSize: "13px", marginTop: "6px" }}>
                     + Add choice ({5 - assessments.length} remaining)
                   </Link>
                 )}
