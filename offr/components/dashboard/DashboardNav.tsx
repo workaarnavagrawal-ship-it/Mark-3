@@ -42,15 +42,7 @@ export function DashboardNav({ name }: { name: string }) {
         {NAV.map(({ href, label }) => {
           const active = pathname === href;
           return (
-            <Link key={href} href={href} style={{
-              display: "block", padding: "9px 12px", borderRadius: "10px",
-              background: active ? "var(--acc)" : "transparent",
-              color: active ? "var(--t-inv)" : "var(--t3)",
-              textDecoration: "none", fontSize: "13px",
-              fontWeight: active ? 500 : 400, transition: "all 150ms",
-            }}
-            onMouseEnter={e => { if (!active) { (e.currentTarget as HTMLElement).style.background = "var(--s3)"; (e.currentTarget as HTMLElement).style.color = "var(--t2)"; }}}
-            onMouseLeave={e => { if (!active) { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; }}}>
+            <Link key={href} href={href} className={`nav-link${active ? " nav-active" : ""}`}>
               {label}
             </Link>
           );

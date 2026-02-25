@@ -1,14 +1,7 @@
 "use client";
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { createBrowserClient } from "@supabase/ssr";
-
-function getSupabase() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-}
+import { createClient } from "@/lib/supabase/client";
 
 function AuthInner() {
   const [loading, setLoading] = useState(false);
@@ -16,18 +9,43 @@ function AuthInner() {
   const searchParams = useSearchParams();
   const callbackError = searchParams.get("error");
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
   async function go() {
-    setErr("");
-    setLoading(true);
-    const supabase = getSupabase();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) {
-      setErr(error.message);
+    setErr(""); setLoading(true);
+
+    if (!supabaseUrl || !supabaseKey) {
+      setErr(`Missing env var(s): ${[!supabaseUrl && "NEXT_PUBLIC_SUPABASE_URL", !supabaseKey && "NEXT_PUBLIC_SUPABASE_ANON_KEY"].filter(Boolean).join(", ")}`);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+
+      const result = await Promise.race([
+        supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback`,
+            skipBrowserRedirect: true,
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Request timed out. Supabase URL: ${supabaseUrl.replace(/https?:\/\//, "")}`)), 12000)
+        ),
+      ]);
+
+      if (result.error) { setErr(result.error.message); setLoading(false); return; }
+      if (result.data?.url) {
+        window.location.href = result.data.url;
+      } else {
+        setErr("No OAuth URL returned — check Google is enabled in Supabase Auth providers");
+        setLoading(false);
+      }
+    } catch (e: any) {
+      setErr(e?.message ?? "Unknown error");
       setLoading(false);
     }
   }
