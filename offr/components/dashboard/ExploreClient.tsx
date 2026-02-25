@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getUniqueCourses } from "@/lib/api";
-import type { UniqueCourse } from "@/lib/types";
+import { computeHiddenGems } from "@/lib/explore";
+import type { UniqueCourse, HiddenGemRecommendation } from "@/lib/types";
 
 interface ExploreClientProps {
   interests: string[];
@@ -50,6 +51,12 @@ export function ExploreClient({ interests }: ExploreClientProps) {
     });
   }, [courses, search]);
 
+  // Compute hidden gems only after courses are loaded
+  const hiddenGems = useMemo<HiddenGemRecommendation[]>(() => {
+    if (loading || !courses.length) return [];
+    return computeHiddenGems(interests, courses, 5);
+  }, [interests, courses, loading]);
+
   return (
     <div style={{ padding: "48px 52px", maxWidth: "860px" }}>
       <div style={{ marginBottom: "40px" }}>
@@ -71,7 +78,48 @@ export function ExploreClient({ interests }: ExploreClientProps) {
         </p>
       </div>
 
-      {/* Search */}
+      {/* ── Hidden Gems ─────────────────────────────────────────────── */}
+      {!loading && !err && hiddenGems.length > 0 && (
+        <div style={{ marginBottom: "40px" }}>
+          <div style={{ marginBottom: "14px" }}>
+            <p className="label" style={{ marginBottom: "4px" }}>Personalised for you</p>
+            <h2
+              className="serif"
+              style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}
+            >
+              Hidden Gems
+            </h2>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {hiddenGems.map((gem) => (
+              <HiddenGemRow key={gem.course.course_key} gem={gem} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* No interests → no gems, show nudge */}
+      {!loading && !err && interests.length === 0 && (
+        <div
+          style={{
+            marginBottom: "28px",
+            padding: "14px 18px",
+            background: "var(--s2)",
+            border: "1px solid var(--b)",
+            borderRadius: "var(--r)",
+            fontSize: "13px",
+            color: "var(--t3)",
+          }}
+        >
+          Add interests to your{" "}
+          <Link href="/dashboard/profile" style={{ color: "var(--t)", textDecoration: "none", borderBottom: "1px solid var(--b-strong)" }}>
+            profile
+          </Link>{" "}
+          to see personalised Hidden Gems here.
+        </div>
+      )}
+
+      {/* ── Search ─────────────────────────────────────────────────── */}
       <div style={{ marginBottom: "20px" }}>
         <input
           className="inp"
@@ -130,135 +178,209 @@ export function ExploreClient({ interests }: ExploreClientProps) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {filtered.map((c) => (
-            <div
-              key={c.course_key}
-              style={{
-                padding: "20px 24px",
-                background: "var(--s1)",
-                border: "1px solid var(--b)",
-                borderRadius: "var(--r)",
-                transition: "border-color 150ms",
-              }}
-              onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLElement).style.borderColor =
-                  "var(--b-strong)")
-              }
-              onMouseLeave={(e) =>
-                ((e.currentTarget as HTMLElement).style.borderColor = "var(--b)")
-              }
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: "16px",
-                }}
-              >
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    <h3
-                      className="serif"
-                      style={{
-                        fontSize: "18px",
-                        fontWeight: 400,
-                        color: "var(--t)",
-                      }}
-                    >
-                      {c.course_name}
-                    </h3>
-                    <span
-                      className="pill"
-                      style={{
-                        fontSize: "11px",
-                        padding: "2px 10px",
-                        borderRadius: "9999px",
-                        border: "1px solid var(--b)",
-                        color: "var(--t3)",
-                        background: "var(--s2)",
-                      }}
-                    >
-                      {c.universities_count}{" "}
-                      {c.universities_count === 1
-                        ? "university"
-                        : "universities"}
-                    </span>
-                  </div>
-                  {c.faculties.length > 0 && (
-                    <p
-                      style={{
-                        fontSize: "12px",
-                        color: "var(--t3)",
-                        marginBottom: "6px",
-                      }}
-                    >
-                      {c.faculties.join(" · ")}
-                    </p>
-                  )}
-                  {c.min_entry_hint && (
-                    <p
-                      style={{
-                        fontSize: "12px",
-                        color: "var(--t3)",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      Typical entry signal: {c.min_entry_hint}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div
-                style={{
-                  marginTop: "12px",
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "6px",
-                  alignItems: "center",
-                }}
-              >
-                {c.universities.slice(0, 4).map((u) => (
-                  <span
-                    key={u.university_id}
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--t3)",
-                      border: "1px solid var(--b)",
-                      borderRadius: "9999px",
-                      padding: "2px 9px",
-                    }}
-                  >
-                    {u.university_name}
-                  </span>
-                ))}
-                <Link
-                  href={`/dashboard/assess?query=${encodeURIComponent(
-                    c.course_name
-                  )}`}
-                  className="link-chances-pill"
-                  style={{
-                    marginLeft: "auto",
-                    fontSize: "12px",
-                    borderStyle: "solid",
-                    borderWidth: "1px",
-                    borderRadius: "9999px",
-                    padding: "4px 12px",
-                  }}
-                >
-                  Check my chances →
-                </Link>
-              </div>
-            </div>
+            <CourseRow key={c.course_key} course={c} />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Hidden Gem row ─────────────────────────────────────────────────────────
+
+function HiddenGemRow({ gem }: { gem: HiddenGemRecommendation }) {
+  const c = gem.course;
+  return (
+    <div
+      style={{
+        padding: "18px 22px",
+        background: "var(--s1)",
+        border: "1px solid var(--b)",
+        borderRadius: "var(--r)",
+        transition: "border-color 150ms",
+      }}
+      onMouseEnter={(e) =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)")
+      }
+      onMouseLeave={(e) =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "var(--b)")
+      }
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
+            <h3
+              className="serif"
+              style={{ fontSize: "16px", fontWeight: 400, color: "var(--t)" }}
+            >
+              {c.course_name}
+            </h3>
+            <span
+              className="pill"
+              style={{
+                fontSize: "11px",
+                padding: "2px 10px",
+                borderRadius: "9999px",
+                border: "1px solid var(--b)",
+                color: "var(--t3)",
+                background: "var(--s2)",
+              }}
+            >
+              {c.universities_count}{" "}
+              {c.universities_count === 1 ? "university" : "universities"}
+            </span>
+          </div>
+          {/* Why suggested */}
+          <p style={{ fontSize: "12px", color: "var(--t3)", lineHeight: 1.5 }}>
+            {gem.reason}
+          </p>
+        </div>
+        <Link
+          href={`/dashboard/assess?query=${encodeURIComponent(c.course_name)}`}
+          className="link-chances-pill"
+          style={{
+            flexShrink: 0,
+            fontSize: "12px",
+            borderStyle: "solid",
+            borderWidth: "1px",
+            borderRadius: "9999px",
+            padding: "4px 12px",
+          }}
+        >
+          Check my chances →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// ── Standard course row ────────────────────────────────────────────────────
+
+function CourseRow({ course: c }: { course: UniqueCourse }) {
+  return (
+    <div
+      style={{
+        padding: "20px 24px",
+        background: "var(--s1)",
+        border: "1px solid var(--b)",
+        borderRadius: "var(--r)",
+        transition: "border-color 150ms",
+      }}
+      onMouseEnter={(e) =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)")
+      }
+      onMouseLeave={(e) =>
+        ((e.currentTarget as HTMLElement).style.borderColor = "var(--b)")
+      }
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "16px",
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              marginBottom: "4px",
+            }}
+          >
+            <h3
+              className="serif"
+              style={{
+                fontSize: "18px",
+                fontWeight: 400,
+                color: "var(--t)",
+              }}
+            >
+              {c.course_name}
+            </h3>
+            <span
+              className="pill"
+              style={{
+                fontSize: "11px",
+                padding: "2px 10px",
+                borderRadius: "9999px",
+                border: "1px solid var(--b)",
+                color: "var(--t3)",
+                background: "var(--s2)",
+              }}
+            >
+              {c.universities_count}{" "}
+              {c.universities_count === 1
+                ? "university"
+                : "universities"}
+            </span>
+          </div>
+          {c.faculties.length > 0 && (
+            <p
+              style={{
+                fontSize: "12px",
+                color: "var(--t3)",
+                marginBottom: "6px",
+              }}
+            >
+              {c.faculties.join(" · ")}
+            </p>
+          )}
+          {c.min_entry_hint && (
+            <p
+              style={{
+                fontSize: "12px",
+                color: "var(--t3)",
+                marginBottom: "4px",
+              }}
+            >
+              Typical entry signal: {c.min_entry_hint}
+            </p>
+          )}
+        </div>
+      </div>
+      <div
+        style={{
+          marginTop: "12px",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "6px",
+          alignItems: "center",
+        }}
+      >
+        {c.universities.slice(0, 4).map((u) => (
+          <span
+            key={u.university_id}
+            style={{
+              fontSize: "11px",
+              color: "var(--t3)",
+              border: "1px solid var(--b)",
+              borderRadius: "9999px",
+              padding: "2px 9px",
+            }}
+          >
+            {u.university_name}
+          </span>
+        ))}
+        <Link
+          href={`/dashboard/assess?query=${encodeURIComponent(
+            c.course_name
+          )}`}
+          className="link-chances-pill"
+          style={{
+            marginLeft: "auto",
+            fontSize: "12px",
+            borderStyle: "solid",
+            borderWidth: "1px",
+            borderRadius: "9999px",
+            padding: "4px 12px",
+          }}
+        >
+          Check my chances →
+        </Link>
+      </div>
     </div>
   );
 }
