@@ -1,7 +1,15 @@
 "use client";
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createBrowserClient } from "@supabase/ssr";
+
+// Create ONE client instance outside the component so it's stable
+function getSupabase() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
 
 function AuthInner() {
   const [loading, setLoading] = useState(false);
@@ -10,15 +18,22 @@ function AuthInner() {
   const callbackError = searchParams.get("error");
 
   async function go() {
-    setErr(""); setLoading(true);
-    const supabase = createClient();
+    setErr("");
+    setLoading(true);
+    const supabase = getSupabase();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        // This ensures PKCE verifier is stored in cookies, not localStorage
+        skipBrowserRedirect: false,
       },
     });
-    if (error) { setErr(error.message); setLoading(false); }
+    if (error) {
+      setErr(error.message);
+      setLoading(false);
+    }
+    // If no error, browser will redirect to Google — don't reset loading
   }
 
   const displayError = err || (callbackError ? decodeURIComponent(callbackError) : "");
@@ -35,7 +50,7 @@ function AuthInner() {
 
         {displayError && (
           <div style={{ marginBottom: "20px", padding: "12px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
-            <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sign-in error</p>
+            <p style={{ fontSize: "11px", color: "var(--t3)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Error</p>
             <p style={{ fontSize: "13px", color: "var(--rch-t)", lineHeight: 1.5 }}>{displayError}</p>
           </div>
         )}
