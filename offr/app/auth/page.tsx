@@ -33,12 +33,30 @@ export default function AuthPage() {
       });
 
       if (error) {
-        setErr(error.message || "Something went wrong sending the link.");
+        const msg = error.message || "Something went wrong sending the link.";
+        if (msg.toLowerCase().includes("failed to fetch")) {
+          setErr(
+            "Could not reach Supabase. Please check your connection and try again."
+          );
+        } else if (msg.toLowerCase().includes("rate limit")) {
+          setErr(
+            "You just requested a link. Please wait 60 seconds before requesting another."
+          );
+        } else {
+          setErr(msg);
+        }
       } else {
         setSent(true);
       }
-    } catch {
-      setErr("Something went wrong sending the link.");
+    } catch (e: any) {
+      const msg = typeof e?.message === "string" ? e.message : "";
+      if (msg.toLowerCase().includes("failed to fetch")) {
+        setErr(
+          "Could not reach Supabase. Please check your connection and try again."
+        );
+      } else {
+        setErr("Something went wrong sending the link.");
+      }
     } finally {
       setLoading(false);
     }
