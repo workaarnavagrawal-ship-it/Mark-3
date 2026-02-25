@@ -261,7 +261,7 @@ export function CourseDetailModal({
                       )}
                       {o.estimated_annual_cost_international != null && (
                         <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "2px" }}>
-                          Int'l annual cost: £{o.estimated_annual_cost_international.toLocaleString()}
+                          Int&apos;l annual cost: £{o.estimated_annual_cost_international.toLocaleString()}
                         </p>
                       )}
                       {o.course_url && (
