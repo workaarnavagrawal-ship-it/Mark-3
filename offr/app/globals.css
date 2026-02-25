@@ -75,6 +75,16 @@ html, body {
   border-color: var(--b-strong);
   background: var(--s2);
 }
+/* Clickable link cards — use instead of onMouseEnter/onMouseLeave on <Link> */
+.link-card {
+  background: var(--s1);
+  border: 1px solid var(--b);
+  transition: border-color 150ms, background 150ms;
+}
+.link-card:hover {
+  border-color: var(--b-strong);
+  background: var(--s2);
+}
 
 .inp {
   width: 100%;
