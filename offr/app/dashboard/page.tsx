@@ -16,6 +16,7 @@ export default async function DashboardPage() {
   const { data: profile } = await supabase.from("profiles").select("*").eq("user_id", user.id).single();
   if (!profile) redirect("/onboarding");
   const { data: assessments } = await supabase.from("assessments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
+  const { data: shortlisted } = await supabase.from("shortlisted_courses").select("course_key, course_name, universities_count").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
   const { data: subjects } = await supabase.from("subjects").select("*").eq("profile_id", profile.id);
 
   const ibTotal = subjects?.filter((s: any) => s.level !== "A_LEVEL").reduce((acc: number, x: any) => acc + Number(x.predicted_grade), 0) || 0;
@@ -82,6 +83,41 @@ export default async function DashboardPage() {
 
       {/* Persona quick actions */}
       <PersonaLinks items={personaRoutes} />
+
+      {/* Shortlisted courses */}
+      <div style={{ marginBottom: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+          <h3 className="serif" style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}>Shortlisted courses</h3>
+          <Link href="/dashboard/explore" style={{ fontSize: "13px", color: "var(--t3)", textDecoration: "none" }}>Explore →</Link>
+        </div>
+        {shortlisted && shortlisted.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {shortlisted.map((s: any) => (
+              <div key={s.course_key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "12px" }}>
+                <div>
+                  <p style={{ fontSize: "14px", color: "var(--t)", fontWeight: 500, marginBottom: "2px" }}>{s.course_name}</p>
+                  <p style={{ fontSize: "12px", color: "var(--t3)" }}>
+                    {s.universities_count} {s.universities_count === 1 ? "university" : "universities"}
+                  </p>
+                </div>
+                <Link
+                  href={`/dashboard/explore`}
+                  style={{ fontSize: "12px", color: "var(--t3)", textDecoration: "none", border: "1px solid var(--b)", borderRadius: "9999px", padding: "4px 12px" }}
+                >
+                  View →
+                </Link>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: "20px 24px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "12px" }}>
+            <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "8px" }}>No courses shortlisted yet.</p>
+            <Link href="/dashboard/explore" style={{ fontSize: "13px", color: "var(--t)", textDecoration: "none", borderBottom: "1px solid var(--b)" }}>
+              Explore courses →
+            </Link>
+          </div>
+        )}
+      </div>
 
       {/* Recent assessments */}
       {assessments && assessments.length > 0 && (
