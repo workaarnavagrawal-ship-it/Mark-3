@@ -21,33 +21,20 @@ function AuthInner() {
       return;
     }
 
-    try {
-      const supabase = createClient();
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback`,
+      },
+    });
 
-      const result = await Promise.race([
-        supabase.auth.signInWithOAuth({
-          provider: "google",
-          options: {
-            redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? location.origin}/auth/callback`,
-            skipBrowserRedirect: true,
-          },
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Request timed out. Supabase URL: ${supabaseUrl.replace(/https?:\/\//, "")}`)), 12000)
-        ),
-      ]);
-
-      if (result.error) { setErr(result.error.message); setLoading(false); return; }
-      if (result.data?.url) {
-        window.location.href = result.data.url;
-      } else {
-        setErr("No OAuth URL returned — check Google is enabled in Supabase Auth providers");
-        setLoading(false);
-      }
-    } catch (e: any) {
-      setErr(e?.message ?? "Unknown error");
+    if (error) {
+      setErr(error.message);
       setLoading(false);
     }
+    // On success the SDK stores the PKCE verifier in cookies and
+    // redirects the browser to Google — no further action needed here.
   }
 
   const displayError = err || (callbackError ? decodeURIComponent(callbackError) : "");
