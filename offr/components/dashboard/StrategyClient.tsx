@@ -51,7 +51,7 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
       <div style={{ marginBottom: "40px" }}>
         <p className="label" style={{ marginBottom: "10px" }}>Optimizer</p>
         <h1 className="serif" style={{ fontSize: "44px", fontWeight: 400, color: "var(--t)", marginBottom: "10px", letterSpacing: "-0.02em" }}>Your Strategy</h1>
-        <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65 }}>Build a smarter shortlist. Analyse your mix, improve your PS, and find alternatives you haven't considered.</p>
+        <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65 }}>Build a smarter shortlist. Analyse your mix, improve your PS, and find alternatives you haven&apos;t considered.</p>
       </div>
 
       {/* Profile snapshot */}
@@ -170,7 +170,7 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
           {!haPS && (
             <div style={{ padding: "16px 20px", background: "var(--tgt-bg)", border: "1px solid var(--tgt-b)", borderRadius: "var(--ri)", marginBottom: "24px" }}>
               <p style={{ fontSize: "13px", color: "var(--tgt-t)", lineHeight: 1.65 }}>
-                You haven't added your PS yet. <Link href="/dashboard/profile" style={{ color: "var(--acc)", textDecoration: "none" }}>Add it in your profile →</Link> — it improves prediction accuracy and unlocks PS analysis.
+                You haven&apos;t added your PS yet. <Link href="/dashboard/profile" style={{ color: "var(--acc)", textDecoration: "none" }}>Add it in your profile →</Link> — it improves prediction accuracy and unlocks PS analysis.
               </p>
             </div>
           )}
