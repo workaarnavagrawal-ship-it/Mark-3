@@ -24,8 +24,11 @@ export default function AuthPage() {
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithOtp({
         email: trimmed,
+        // Magic link PKCE flow: the email template will contain
+        // {{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email
+        // so we don't set emailRedirectTo here.
         options: {
-          emailRedirectTo: `${location.origin}/auth/callback`,
+          shouldCreateUser: true,
         },
       });
 

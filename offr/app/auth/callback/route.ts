@@ -21,13 +21,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type");
-  const isMagicLink = tokenHash && type;
-  const isCodeFlow = code && !isMagicLink;
 
-  if (!isMagicLink && !isCodeFlow) {
+  if (!tokenHash || !type) {
     return NextResponse.redirect(
       new URL(
         "/auth?error=No+authorisation+credentials+received",
@@ -58,37 +55,19 @@ export async function GET(request: Request) {
     }
   );
 
-  let userId: string | null = null;
-  let topLevelError: string | null = null;
+  // Email magic link (token_hash + type=email) – verify and create session
+  const { data, error } = await supabase.auth.verifyOtp({
+    token_hash: tokenHash,
+    type: type as "email" | "magiclink",
+  });
 
-  if (isMagicLink && tokenHash && type) {
-    // Email magic link (token_hash + type=email) – verify and create session
-    const { data, error } = await supabase.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: type as "email" | "magiclink",
-    });
-    if (error) {
-      topLevelError = error.message;
-    } else {
-      userId = data.user?.id ?? null;
-    }
-  } else if (isCodeFlow && code) {
-    // OAuth / PKCE-style code flow
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      topLevelError = error.message;
-    } else {
-      userId = data.user?.id ?? null;
-    }
-  }
-
-  if (topLevelError) {
+  if (error) {
     return NextResponse.redirect(
-      new URL(`/auth?error=${encodeURIComponent(topLevelError)}`, siteUrl)
+      new URL(`/auth?error=${encodeURIComponent(error.message)}`, siteUrl)
     );
   }
 
-  if (!userId) {
+  if (!data.user) {
     return NextResponse.redirect(
       new URL("/auth?error=Sign+in+succeeded+but+no+user+was+returned", siteUrl)
     );
@@ -97,7 +76,7 @@ export async function GET(request: Request) {
   const { data: profile } = await supabase
     .from("profiles")
     .select("id")
-    .eq("user_id", userId)
+    .eq("user_id", data.user.id)
     .single();
 
   const dest = profile ? "/dashboard" : "/onboarding";
