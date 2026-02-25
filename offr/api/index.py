@@ -251,6 +251,18 @@ def get_row(course_id: str) -> Dict[str, Any]:
     return {k: nan_to_none(v) for k, v in rec.items()}
 
 
+def normalize_course_key(name: str) -> str:
+    """
+    Normalise a course name into a stable key for deduping across universities.
+    Lowercase, collapse non-alphanumerics to hyphens, strip duplicates.
+    """
+    base = clean_str(name).lower()
+    # keep letters, numbers and spaces; drop everything else
+    base = re.sub(r"[^a-z0-9\s]", " ", base)
+    base = re.sub(r"\s+", " ", base).strip()
+    return re.sub(r"\s+", "-", base)
+
+
 # ─────────────────────────────────────────────────────────────
 # Offer parsing
 # ─────────────────────────────────────────────────────────────
@@ -844,11 +856,18 @@ def run_standalone_ps_analysis(
     lines: List[str],
     ps_format: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Standalone PS analyser used by /api/py/analyse_ps.
+    Tries Gemini first; if unavailable or fails, falls back to a rule-based heuristic
+    implementation so the feature still works instead of returning 500s.
+    """
     client = gemini_client()
-    if client is None:
-        return None, "PS analysis unavailable (Gemini not configured)."
-
     heur = ps_heuristics(statement)
+
+    # ── Fallback: no Gemini configured ────────────────────────────────
+    if client is None:
+        return _fallback_ps_analysis(statement, lines, heur), None
+
     prompt = f"""You are a world-class UK university admissions consultant.
 Analyse this personal statement and return ONLY valid JSON. No markdown, no code fences.
 
@@ -898,9 +917,178 @@ activities listed without reflection."""
         text = re.sub(r"\s*```$", "", text)
         return json.loads(text), None
     except json.JSONDecodeError as e:
-        return None, safe_detail("PS JSON parse failed", e)
+        # If model responded but JSON is broken, degrade gracefully to heuristic output
+        return _fallback_ps_analysis(statement, lines, heur), safe_detail(
+            "PS JSON parse failed", e
+        )
     except Exception as e:
-        return None, safe_detail("PS analysis failed", e)
+        # Any other model error: fall back to heuristic implementation
+        return _fallback_ps_analysis(statement, lines, heur), safe_detail(
+            "PS analysis failed", e
+        )
+
+
+def _fallback_ps_analysis(
+    statement: str, lines: List[str], heur: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Lightweight, fully local PS analysis used when Gemini is unavailable.
+    It is intentionally simple but stable so the feature keeps working in all envs.
+    """
+    total_chars = len(statement)
+    words = re.findall(r"[A-Za-z']+", statement)
+    word_count = len(words)
+
+    evidence_markers = heur.get("evidence_markers_count", 0)
+    cliches = len(heur.get("cliche_flags", []))
+    specificity = heur.get("specificity_estimate", 0)
+    repetition = heur.get("repetition_ngram_clusters", 0)
+
+    # Overall score: start from mid and tweak based on heuristics
+    score = 55
+    if 250 <= word_count <= 900:
+        score += 10
+    elif word_count < 200 or word_count > 1200:
+        score -= 8
+
+    score += min(15, evidence_markers * 3)
+    score += min(10, max(0, specificity // 5))
+    score -= min(12, cliches * 3)
+    score -= min(10, repetition * 2)
+    overall = int(max(0, min(100, score)))
+
+    if overall >= 80:
+        band = "Exceptional"
+    elif overall >= 65:
+        band = "Strong"
+    elif overall >= 50:
+        band = "Solid"
+    elif overall >= 35:
+        band = "Developing"
+    else:
+        band = "Weak"
+
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+
+    if evidence_markers >= 3:
+        strengths.append(
+            "Uses specific experiences and reflections rather than only generic claims."
+        )
+    if specificity >= 8:
+        strengths.append(
+            "Includes concrete details and proper nouns, which usually signal genuine engagement."
+        )
+    if 250 <= word_count <= 900:
+        strengths.append("Length is within a healthy range for a focused UCAS-style PS.")
+
+    if cliches:
+        weaknesses.append(
+            "Contains common opening phrases or clichés that admissions tutors see very often."
+        )
+    if evidence_markers <= 1:
+        weaknesses.append(
+            "Not enough evidence-based sentences tying experiences to skills or motivation."
+        )
+    if repetition:
+        weaknesses.append(
+            "Repeats similar phrasing or ideas several times; consider tightening the writing."
+        )
+    if word_count < 300:
+        weaknesses.append("Very short overall; there may not be enough depth or evidence.")
+    elif word_count > 1100:
+        weaknesses.append(
+            "Quite long; tightening and prioritising your strongest points would help."
+        )
+
+    if strengths:
+        summary = (
+            "Overall this personal statement shows some solid foundations and potential. "
+            "There are clear positives, but there is also room to sharpen focus and depth."
+        )
+    else:
+        summary = (
+            "At the moment this reads more like a first draft. It needs more specific evidence, "
+            "clearer structure, and less generic phrasing to stand out to admissions tutors."
+        )
+
+    if weaknesses:
+        top_priority = weaknesses[0]
+    else:
+        top_priority = (
+            "Tighten the structure so each paragraph has a clear purpose linked to the course."
+        )
+
+    line_feedback: List[Dict[str, Any]] = []
+    for idx, line in enumerate(lines):
+        text = line.strip()
+        if not text:
+            continue
+
+        lc = text.lower()
+        has_because = "because" in lc or "which showed" in lc or "this led" in lc
+        has_i_learned = "i learned" in lc or "i realised" in lc or "i realized" in lc
+        has_cliche = any(
+            c in lc
+            for c in [
+                "since i was young",
+                "from a young age",
+                "always been fascinated",
+                "i am passionate",
+            ]
+        )
+
+        base = 6
+        if has_because or has_i_learned:
+            base += 2
+        if has_cliche:
+            base -= 2
+        if len(text) < 40:
+            base -= 1
+        if len(text) > 260:
+            base -= 1
+
+        score_line = max(1, min(10, base))
+        if score_line >= 8:
+            verdict = "strong"
+        elif score_line >= 6:
+            verdict = "improve"
+        elif score_line >= 4:
+            verdict = "neutral"
+        else:
+            verdict = "weak"
+
+        if has_cliche:
+            fb = "This sentence leans on a very common phrase — try to replace it with something more specific to you."
+        elif has_because or has_i_learned:
+            fb = "Good use of reflection and cause-and-effect; you could still be even more concrete about what changed."
+        else:
+            fb = "This could work better if you add a short, concrete example or outcome to back up the claim."
+
+        line_feedback.append(
+            {
+                "lineNumber": idx,
+                "line": text,
+                "score": score_line,
+                "verdict": verdict,
+                "feedback": fb,
+                "suggestion": None,
+            }
+        )
+
+    return {
+        "overallScore": overall,
+        "band": band,
+        "summary": summary,
+        "strengths": strengths or [
+            "Clear starting point to build from once you add more specific evidence and reflection."
+        ],
+        "weaknesses": weaknesses or [
+            "Could benefit from clearer structure and more concrete examples tied to the course."
+        ],
+        "topPriority": top_priority,
+        "lineFeedback": line_feedback,
+    }
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1047,6 +1235,149 @@ def courses(university_id: Optional[str] = None, query: Optional[str] = None):
 @app.get("/api/py/course/{course_id}")
 def course(course_id: str):
     return get_row(course_id)
+
+
+@app.get("/api/py/unique_courses")
+def unique_courses(q: Optional[str] = None):
+    """
+    Aggregated, de-duplicated list of courses across all universities.
+    Each logical course appears once, with supporting metadata.
+    """
+    df = load_df()
+    if "course_name" not in df.columns or "university_id" not in df.columns:
+        raise HTTPException(status_code=500, detail="course_name/university_id missing from data")
+
+    view = df[["course_name", "university_id", "faculty", "degree_type", "min_requirements"]].copy()
+    if q:
+        ql = q.lower()
+        name_mask = view["course_name"].astype(str).str.lower().str.contains(ql, na=False)
+        fac_mask = view["faculty"].astype(str).str.lower().str.contains(ql, na=False)
+        view = view[name_mask | fac_mask]
+
+    records: Dict[str, Dict[str, Any]] = {}
+    for _, row in view.iterrows():
+        name = clean_str(row.get("course_name"))
+        if not name:
+            continue
+        key = normalize_course_key(name)
+        uni_id = clean_str(row.get("university_id"))
+        fac = clean_str(row.get("faculty"))
+        deg = clean_str(row.get("degree_type"))
+        min_req = clean_str(row.get("min_requirements"))
+
+        if key not in records:
+            records[key] = {
+                "course_key": key,
+                "course_name": name,
+                "universities": [],
+                "faculties": set(),
+                "degree_types": set(),
+                "min_entry_examples": [],
+            }
+
+        rec = records[key]
+        if uni_id:
+            uni_name = UNIVERSITY_NAME_MAP.get(uni_id, uni_id)
+            if not any(u["university_id"] == uni_id for u in rec["universities"]):
+                rec["universities"].append({"university_id": uni_id, "university_name": uni_name})
+        if fac:
+            rec["faculties"].add(fac)
+        if deg:
+            rec["degree_types"].add(deg)
+        if min_req:
+            if len(rec["min_entry_examples"]) < 3 and min_req not in rec["min_entry_examples"]:
+                rec["min_entry_examples"].append(min_req)
+
+    out: List[Dict[str, Any]] = []
+    for key, rec in records.items():
+        faculties = sorted(rec["faculties"])
+        degree_types = sorted(rec["degree_types"])
+        min_entry_hint = None
+        if rec["min_entry_examples"]:
+            # Just show one short string as a hint; keep it honest and simple.
+            min_entry_hint = rec["min_entry_examples"][0]
+        out.append(
+            {
+                "course_key": rec["course_key"],
+                "course_name": rec["course_name"],
+                "universities_count": len(rec["universities"]),
+                "universities": rec["universities"],
+                "faculties": faculties,
+                "degree_types": degree_types,
+                "min_entry_hint": min_entry_hint,
+            }
+        )
+
+    # Sort by course_name for a calm, predictable list.
+    out.sort(key=lambda x: x["course_name"])
+    return out
+
+
+@app.get("/api/py/unique_courses/{course_key}")
+def unique_course_detail(course_key: str):
+    """
+    Detailed view of a logical course, with per-university offerings.
+    """
+    df = load_df()
+    if "course_name" not in df.columns or "course_id" not in df.columns or "university_id" not in df.columns:
+        raise HTTPException(status_code=500, detail="course_name/course_id/university_id missing from data")
+
+    mask = df["course_name"].astype(str).apply(lambda n: normalize_course_key(n) == course_key)
+    subset = df[mask]
+    if subset.empty:
+        raise HTTPException(status_code=404, detail=f"course_key not found: {course_key}")
+
+    # Build aggregated course meta from the subset
+    sample_name = clean_str(subset.iloc[0].get("course_name"))
+    faculties = sorted({clean_str(x) for x in subset.get("faculty", "").tolist() if clean_str(x)})
+    degree_types = sorted({clean_str(x) for x in subset.get("degree_type", "").tolist() if clean_str(x)})
+
+    universities: List[Dict[str, Any]] = []
+    seen_unis: set = set()
+    min_examples: List[str] = []
+
+    offerings: List[Dict[str, Any]] = []
+    for _, row in subset.iterrows():
+        course_id = clean_str(row.get("course_id"))
+        uni_id = clean_str(row.get("university_id"))
+        if not course_id or not uni_id:
+            continue
+        # Use existing row helper to normalise fields
+        full = get_row(course_id)
+        uni_name = UNIVERSITY_NAME_MAP.get(uni_id, uni_id)
+        if uni_id not in seen_unis:
+            universities.append({"university_id": uni_id, "university_name": uni_name})
+            seen_unis.add(uni_id)
+
+        min_req = clean_str(full.get("min_requirements"))
+        if min_req and len(min_examples) < 3 and min_req not in min_examples:
+            min_examples.append(min_req)
+
+        offerings.append(
+            {
+                "course_id": full.get("course_id"),
+                "university_id": uni_id,
+                "university_name": uni_name,
+                "typical_offer": full.get("typical_offer"),
+                "required_subjects": full.get("required_subjects"),
+                "course_url": full.get("course_url"),
+                "estimated_annual_cost_international": full.get("estimated_annual_cost_international"),
+                "min_requirements": full.get("min_requirements"),
+            }
+        )
+
+    min_entry_hint = min_examples[0] if min_examples else None
+    course_meta = {
+        "course_key": course_key,
+        "course_name": sample_name,
+        "universities_count": len(universities),
+        "universities": universities,
+        "faculties": faculties,
+        "degree_types": degree_types,
+        "min_entry_hint": min_entry_hint,
+    }
+
+    return {"course": course_meta, "offerings": offerings}
 
 
 @app.post("/api/py/assess")

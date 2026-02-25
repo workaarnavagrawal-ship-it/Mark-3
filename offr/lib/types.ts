@@ -71,6 +71,34 @@ export interface CourseDetail extends CourseListItem {
   ps_expected_signals?: string;
 }
 
+// ── Explore / Unique courses ────────────────────────────────────────
+
+export interface UniqueCourse {
+  course_key: string;
+  course_name: string;
+  universities_count: number;
+  universities: { university_id: string; university_name: string }[];
+  faculties: string[];
+  degree_types: string[];
+  min_entry_hint?: string;
+}
+
+export interface UniqueCourseOffering {
+  course_id: string;
+  university_id: string;
+  university_name: string;
+  typical_offer?: string;
+  required_subjects?: string;
+  course_url?: string;
+  estimated_annual_cost_international?: number | null;
+  min_requirements?: string | null;
+}
+
+export interface UniqueCourseDetail {
+  course: UniqueCourse;
+  offerings: UniqueCourseOffering[];
+}
+
 export interface IBSubject { subject: string; grade: number; }
 export interface ALevelItem { subject: string; grade: string; }
 
@@ -184,4 +212,18 @@ export interface PSAnalysisResponse {
   weaknesses: string[];
   topPriority: string;
   lineFeedback: PSLineFeedback[];
+}
+
+// ── Explore: Hidden gems & shortlist ────────────────────────────────
+
+export interface HiddenGemRecommendation {
+  course: UniqueCourse;
+  reason: string;
+}
+
+export interface ShortlistedCourse {
+  course_key: string;
+  course_name: string;
+  universities_count: number;
+  created_at: string;
 }

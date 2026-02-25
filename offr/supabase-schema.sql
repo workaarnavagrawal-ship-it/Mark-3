@@ -44,13 +44,26 @@ create table if not exists assessments (
   created_at timestamptz default now()
 );
 
+-- Shortlisted courses (course-centric, not uni-specific)
+create table if not exists shortlisted_courses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  course_key text not null,
+  course_name text not null,
+  universities_count integer default 0,
+  created_at timestamptz default now(),
+  unique (user_id, course_key)
+);
+
 -- RLS
 alter table profiles enable row level security;
 alter table subjects enable row level security;
 alter table assessments enable row level security;
+alter table shortlisted_courses enable row level security;
 
 create policy "Users own their profile" on profiles for all using (auth.uid() = user_id);
 create policy "Users own their subjects" on subjects for all using (
   auth.uid() = (select user_id from profiles where id = profile_id)
 );
 create policy "Users own their assessments" on assessments for all using (auth.uid() = user_id);
+create policy "Users own their shortlisted courses" on shortlisted_courses for all using (auth.uid() = user_id);

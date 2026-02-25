@@ -1,4 +1,13 @@
-import type { CourseDetail, CourseListItem, OfferAssessRequest, OfferAssessResponse, UniversityItem } from "./types";
+import type {
+  CourseDetail,
+  CourseListItem,
+  OfferAssessRequest,
+  OfferAssessResponse,
+  UniversityItem,
+  UniqueCourse,
+  UniqueCourseDetail,
+  ShortlistedCourse,
+} from "./types";
 
 const BASE = "/api/py";
 
@@ -48,3 +57,41 @@ export const postAnalysePS = (body: {
 // ── Course search ────────────────────────────────────────────────
 export const searchCourses = (query: string) =>
   apiFetch<import("./types").CourseListItem[]>(`/courses?query=${encodeURIComponent(query)}`);
+
+// ── Unique course listing (explore) ───────────────────────────────
+
+export const getUniqueCourses = (query?: string) =>
+  apiFetch<UniqueCourse[]>(`/unique_courses${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+
+export const getUniqueCourseDetail = (course_key: string) =>
+  apiFetch<UniqueCourseDetail>(`/unique_courses/${encodeURIComponent(course_key)}`);
+
+// ── Shortlist (Next.js API, Supabase-backed) ─────────────────────
+
+async function shortlistFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "Unknown error");
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export const listShortlistedCourses = () =>
+  shortlistFetch<ShortlistedCourse[]>("/api/shortlist");
+
+export const addShortlistedCourse = (input: {
+  course_key: string;
+  course_name: string;
+  universities_count: number;
+}) =>
+  shortlistFetch<ShortlistedCourse>("/api/shortlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+export const removeShortlistedCourse = (course_key: string) =>
+  shortlistFetch<{ success: true }>(`/api/shortlist/${encodeURIComponent(course_key)}`, {
+    method: "DELETE",
+  });
