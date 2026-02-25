@@ -1,20 +1,27 @@
 "use client";
-import { useState } from "react";
+import { useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function AuthPage() {
+function AuthInner() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const searchParams = useSearchParams();
+  const callbackError = searchParams.get("error");
 
   async function go() {
     setErr(""); setLoading(true);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
     });
     if (error) { setErr(error.message); setLoading(false); }
   }
+
+  const displayError = err || (callbackError ? decodeURIComponent(callbackError) : "");
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", background: "var(--bg)" }}>
@@ -26,19 +33,26 @@ export default function AuthPage() {
           Continue with Google to access your profile, predictions, and tracker.
         </p>
 
-        {err && (
-          <div style={{ marginBottom: "16px", padding: "12px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
-            <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{err}</p>
+        {displayError && (
+          <div style={{ marginBottom: "20px", padding: "12px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
+            <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Sign-in error</p>
+            <p style={{ fontSize: "13px", color: "var(--rch-t)", lineHeight: 1.5 }}>{displayError}</p>
           </div>
         )}
 
-        <button onClick={go} disabled={loading} className="btn" style={{
-          width: "100%", background: "var(--s2)", border: "1px solid var(--b-strong)",
-          color: "var(--t)", fontSize: "14px", padding: "14px 20px",
-          transition: "all 150ms",
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--acc)"; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; }}>
+        <button
+          onClick={go}
+          disabled={loading}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: "12px",
+            padding: "14px 20px", background: "var(--s2)", border: "1px solid var(--b-strong)",
+            borderRadius: "var(--ri)", color: "var(--t)", fontSize: "14px", fontWeight: 500,
+            cursor: loading ? "not-allowed" : "pointer", transition: "all 150ms",
+            fontFamily: "var(--font-dm, var(--sans))", opacity: loading ? 0.6 : 1,
+          }}
+          onMouseEnter={e => { if (!loading) (e.currentTarget as HTMLElement).style.borderColor = "var(--acc)"; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; }}
+        >
           {loading ? (
             <span style={{ width: "16px", height: "16px", border: "1.5px solid var(--b-strong)", borderTopColor: "var(--t2)", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
           ) : (
@@ -49,13 +63,21 @@ export default function AuthPage() {
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
             </svg>
           )}
-          {loading ? "Signing in…" : "Continue with Google"}
+          {loading ? "Redirecting to Google…" : "Continue with Google"}
         </button>
 
         <p style={{ marginTop: "20px", fontSize: "12px", color: "var(--t3)", textAlign: "center", lineHeight: 1.6 }}>
-          Your data is private and secure. Only you can see your profile.
+          Your data is private. Only you can see your profile.
         </p>
       </div>
     </div>
+  );
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense>
+      <AuthInner />
+    </Suspense>
   );
 }
