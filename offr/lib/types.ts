@@ -38,6 +38,7 @@ export interface Profile {
   ps_q3?: string;
   ps_format?: "UCAS_3Q" | "LEGACY";
   ps_statement?: string;
+  ps_last_analysis?: PSAnalysisResponse;
   created_at?: string;
   updated_at?: string;
 }

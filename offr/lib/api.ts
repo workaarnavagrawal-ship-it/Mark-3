@@ -63,8 +63,15 @@ export const searchCourses = (query: string) =>
 export const getUniqueCourses = (query?: string) =>
   apiFetch<UniqueCourse[]>(`/unique_courses${query ? `?q=${encodeURIComponent(query)}` : ""}`);
 
-export const getUniqueCourseDetail = (course_key: string) =>
-  apiFetch<UniqueCourseDetail>(`/unique_courses/${encodeURIComponent(course_key)}`);
+// Module-level cache: course_key → detail (lives for the page session)
+const _detailCache = new Map<string, UniqueCourseDetail>();
+
+export async function getUniqueCourseDetail(course_key: string): Promise<UniqueCourseDetail> {
+  if (_detailCache.has(course_key)) return _detailCache.get(course_key)!;
+  const detail = await apiFetch<UniqueCourseDetail>(`/unique_courses/${encodeURIComponent(course_key)}`);
+  _detailCache.set(course_key, detail);
+  return detail;
+}
 
 // ── Shortlist (Next.js API, Supabase-backed) ─────────────────────
 
