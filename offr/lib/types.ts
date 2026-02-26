@@ -279,6 +279,60 @@ export interface PSAnalysisResponse {
   lineFeedback: PSLineFeedback[];
 }
 
+// ── PS Evaluate (new hardened contract) ──────────────────────────────
+export interface PSEvaluateRequest {
+  personal_statement_text: string;  // required, min 300 chars
+  target_course: string;            // required
+  target_university?: string | null;
+  curriculum?: "IB" | "ALEVEL" | null;
+  grades_summary?: string | null;
+  mode?: "standalone" | "assessment";
+}
+
+export interface PSRubricDimension {
+  score: number;  // 0–20
+  notes: string[];
+}
+
+export interface PSEvaluateSuccess {
+  status: "ok";
+  ps_band: "EXCEPTIONAL" | "STRONG" | "OK" | "WEAK";
+  score: number;  // 0–100
+  rubric: {
+    course_fit: PSRubricDimension;
+    specificity_and_evidence: PSRubricDimension;
+    structure_and_coherence: PSRubricDimension;
+    voice_and_authenticity: PSRubricDimension;
+    reflection_and_growth: PSRubricDimension;
+  };
+  top_strengths: string[];
+  top_improvements: string[];
+  line_level_fixes: string[] | null;
+  summary_reasoning: string;
+  grade_compliment_note: string | null;
+  impact_on_chances: {
+    weight_class: "PS_HEAVY" | "PS_MED" | "PS_LIGHT" | "UNKNOWN";
+    suggested_impact_points: number;
+    rationale: string;
+  };
+  meta: {
+    request_id: string;
+    model: string;
+    latency_ms: number;
+  };
+}
+
+export interface PSEvaluateError {
+  status: "error";
+  error_code: string;
+  message: string;
+  retryable: boolean;
+  request_id: string;
+  details: Record<string, unknown> | null;
+}
+
+export type PSEvaluateResponse = PSEvaluateSuccess | PSEvaluateError;
+
 // ── Dashboard AI insights ──────────────────────────────────────────
 export interface DashboardInsightsRequest {
   curriculum: string;

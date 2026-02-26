@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("offr.api")
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
@@ -59,25 +63,81 @@ UNIVERSITY_NAME_MAP = {
 
 # ─────────────────────────────────────────────────────────────
 # PS university-tier weighting
+# Edit the sets below to adjust which universities fall into each tier.
 # ─────────────────────────────────────────────────────────────
 
-PS_HEAVY_UNIS    = {"OXF", "CAM", "LSE", "IMP", "UCL"}
-PS_MODERATE_UNIS = {"KCL", "WAR", "EDIN", "BRIS", "DUR", "MAN", "STA"}
-PS_LIGHT_UNIS    = {"BATH", "EXE"}
+# PS_HEAVY: these universities read the PS very carefully; it can make or break an offer
+PS_HEAVY_UNIS: set = {
+    "OXF",  # University of Oxford
+    "CAM",  # University of Cambridge
+    "LSE",  # London School of Economics
+    "IMP",  # Imperial College London
+    "UCL",  # University College London
+}
+
+# PS_MED: PS matters meaningfully; a weak one can hurt
+PS_MODERATE_UNIS: set = {
+    "KCL",   # King's College London
+    "WAR",   # University of Warwick
+    "EDIN",  # University of Edinburgh
+    "BRIS",  # University of Bristol
+    "DUR",   # Durham University
+    "MAN",   # University of Manchester
+    "STA",   # University of St Andrews
+}
+
+# PS_LIGHT: PS is reviewed but grades dominate
+PS_LIGHT_UNIS: set = {
+    "BATH",  # University of Bath
+    "EXE",   # University of Exeter
+}
+
+# Name-to-ID lookup used by /ps-evaluate when target_university is a plain name
+PS_UNI_NAME_TO_ID: Dict[str, str] = {
+    "oxford":                    "OXF",
+    "university of oxford":      "OXF",
+    "cambridge":                 "CAM",
+    "university of cambridge":   "CAM",
+    "lse":                       "LSE",
+    "london school of economics":"LSE",
+    "imperial":                  "IMP",
+    "imperial college london":   "IMP",
+    "ucl":                       "UCL",
+    "university college london": "UCL",
+    "kcl":                       "KCL",
+    "king's college london":     "KCL",
+    "kings college london":      "KCL",
+    "warwick":                   "WAR",
+    "university of warwick":     "WAR",
+    "edinburgh":                 "EDIN",
+    "university of edinburgh":   "EDIN",
+    "bristol":                   "BRIS",
+    "university of bristol":     "BRIS",
+    "durham":                    "DUR",
+    "durham university":         "DUR",
+    "manchester":                "MAN",
+    "university of manchester":  "MAN",
+    "st andrews":                "STA",
+    "university of st andrews":  "STA",
+    "bath":                      "BATH",
+    "university of bath":        "BATH",
+    "exeter":                    "EXE",
+    "university of exeter":      "EXE",
+}
 
 PS_SCORE_IMPACT: Dict[Tuple[str, str], int] = {
-    ("heavy",    "Exceptional"): +12,
-    ("heavy",    "Strong"):       +6,
+    ("heavy",    "EXCEPTIONAL"): +12,
+    ("heavy",    "STRONG"):       +6,
     ("heavy",    "OK"):           -8,
-    ("heavy",    "Weak"):        -20,
-    ("moderate", "Exceptional"):  +8,
-    ("moderate", "Strong"):       +4,
+    ("heavy",    "WEAK"):        -20,
+    ("moderate", "EXCEPTIONAL"):  +8,
+    ("moderate", "STRONG"):       +4,
     ("moderate", "OK"):           -4,
-    ("moderate", "Weak"):        -12,
-    ("light",    "Exceptional"):  +5,
-    ("light",    "Strong"):       +2,
+    ("moderate", "WEAK"):        -12,
+    ("light",    "EXCEPTIONAL"):  +5,
+    ("light",    "STRONG"):       +2,
     ("light",    "OK"):            0,
-    ("light",    "Weak"):         -5,
+    ("light",    "WEAK"):         -5,
 }
 
 
@@ -86,6 +146,17 @@ def get_ps_tier(university_id: str) -> str:
     if uid in PS_HEAVY_UNIS:    return "heavy"
     if uid in PS_MODERATE_UNIS: return "moderate"
     return "light"
+
+
+def resolve_uni_id(raw: Optional[str]) -> Optional[str]:
+    """
+    Convert a plain university name (e.g. "Oxford") to its internal ID (e.g. "OXF").
+    Returns None if not found — unknown universities fall to PS_LIGHT tier automatically.
+    """
+    if not raw:
+        return None
+    key = raw.strip().lower()
+    return PS_UNI_NAME_TO_ID.get(key)
 
 
 def apply_ps_score(
@@ -2427,3 +2498,509 @@ async def ask_faq(payload: AskFAQRequest):
         "follow_up_questions": result.get("follow_up_questions") or [],
         "provider_meta": {"latency_ms": latency_ms},
     }
+
+
+# ═════════════════════════════════════════════════════════════
+# PS Evaluate — /api/py/ps-evaluate
+# New, hardened, contract-versioned PS analyser endpoint.
+# Replaces the old /api/py/analyse_ps for new UI flows.
+# Old endpoint kept for backward-compat.
+# ═════════════════════════════════════════════════════════════
+
+PS_EVALUATE_MIN_CHARS = 300
+
+
+# ── Request model ─────────────────────────────────────────────
+
+class PSEvaluateRequest(BaseModel):
+    personal_statement_text: str = Field(min_length=PS_EVALUATE_MIN_CHARS)
+    target_course: str = Field(min_length=1)
+    target_university: Optional[str] = None
+    curriculum: Optional[str] = Field(
+        default=None, pattern="^(IB|ALEVEL)$"
+    )
+    grades_summary: Optional[str] = None
+    mode: str = Field(default="standalone", pattern="^(standalone|assessment)$")
+
+
+# ── Response sub-models ───────────────────────────────────────
+
+class PSRubricDimension(BaseModel):
+    score: int = Field(ge=0, le=20)
+    notes: List[str]
+
+
+class PSImpactOnChances(BaseModel):
+    weight_class: str
+    suggested_impact_points: int
+    rationale: str
+
+
+class PSEvaluateMeta(BaseModel):
+    request_id: str
+    model: str
+    latency_ms: int
+
+
+# ── Helpers ───────────────────────────────────────────────────
+
+def _ps_weight_class(uni_raw: Optional[str]) -> str:
+    if not uni_raw:
+        return "UNKNOWN"
+    uid = resolve_uni_id(uni_raw) or uni_raw.strip().upper()
+    if uid in PS_HEAVY_UNIS:
+        return "PS_HEAVY"
+    if uid in PS_MODERATE_UNIS:
+        return "PS_MED"
+    return "PS_LIGHT"
+
+
+def _ps_impact_points(weight_class: str, ps_band: str) -> int:
+    tier_map = {"PS_HEAVY": "heavy", "PS_MED": "moderate", "PS_LIGHT": "light", "UNKNOWN": "light"}
+    tier = tier_map.get(weight_class, "light")
+    return PS_SCORE_IMPACT.get((tier, ps_band), 0)
+
+
+def _ps_band_from_score(score: int) -> str:
+    if score >= 80: return "EXCEPTIONAL"
+    if score >= 60: return "STRONG"
+    if score >= 40: return "OK"
+    return "WEAK"
+
+
+def _sanitise_ps_evaluate_rubric(raw_rubric: Any) -> Dict[str, Any]:
+    required = [
+        "course_fit",
+        "specificity_and_evidence",
+        "structure_and_coherence",
+        "voice_and_authenticity",
+        "reflection_and_growth",
+    ]
+    if not isinstance(raw_rubric, dict):
+        raw_rubric = {}
+    out: Dict[str, Any] = {}
+    for key in required:
+        cell = raw_rubric.get(key) or {}
+        if not isinstance(cell, dict):
+            cell = {}
+        try:
+            score = max(0, min(20, int(cell.get("score", 10))))
+        except (TypeError, ValueError):
+            score = 10
+        notes = cell.get("notes", [])
+        if not isinstance(notes, list):
+            notes = [str(notes)] if notes else []
+        out[key] = {"score": score, "notes": [str(n) for n in notes[:5]]}
+    return out
+
+
+def _weighted_ps_score(rubric: Dict[str, Any]) -> int:
+    weights = {
+        "course_fit":               30,
+        "specificity_and_evidence": 25,
+        "structure_and_coherence":  20,
+        "voice_and_authenticity":   15,
+        "reflection_and_growth":    10,
+    }
+    total_weight = sum(weights.values())
+    weighted = sum(
+        (rubric.get(k, {}).get("score", 10) / 20.0) * w
+        for k, w in weights.items()
+    )
+    return int(round((weighted / total_weight) * 100))
+
+
+def _build_ps_evaluate_prompt(
+    ps_text: str,
+    target_course: str,
+    target_university: Optional[str],
+    curriculum: Optional[str],
+    grades_summary: Optional[str],
+) -> str:
+    uni_line        = f"Target university: {target_university}" if target_university else "Target university: not specified"
+    curriculum_line = f"Curriculum: {curriculum}" if curriculum else ""
+    grades_line     = (f"Grades summary (context only — do not over-weight): {grades_summary}" if grades_summary else "")
+    context_lines   = "\n".join(l for l in [uni_line, curriculum_line, grades_line] if l)
+    grade_note_instruction = (
+        f'  "grade_compliment_note": "<one calm sentence on whether the PS is broadly consistent with: {grades_summary}>"'
+        if grades_summary
+        else '  "grade_compliment_note": null'
+    )
+
+    return f"""You are a calm, experienced UK university admissions reviewer.
+Evaluate the following personal statement for the specified course.
+
+Context:
+{context_lines}
+
+Personal statement:
+\"\"\"
+{ps_text[:4500]}
+\"\"\"
+
+Instructions:
+- Evaluate ONLY in terms of the target course: {target_course}.
+- Do NOT comment on extracurricular alignment or personal interests beyond what the PS shows.
+- Be specific, honest, calm. No hype. No guarantees. No fake certainty.
+- Output ONLY valid JSON. No markdown, no code fences, no preamble.
+
+Required JSON structure (output this exactly):
+{{
+  "rubric": {{
+    "course_fit": {{
+      "score": <integer 0-20>,
+      "notes": ["<specific observation about how well the PS relates to {target_course}>"]
+    }},
+    "specificity_and_evidence": {{
+      "score": <integer 0-20>,
+      "notes": ["<concrete examples vs vague claims>"]
+    }},
+    "structure_and_coherence": {{
+      "score": <integer 0-20>,
+      "notes": ["<logical flow, paragraph structure>"]
+    }},
+    "voice_and_authenticity": {{
+      "score": <integer 0-20>,
+      "notes": ["<register, authentic tone, absence of clichés>"]
+    }},
+    "reflection_and_growth": {{
+      "score": <integer 0-20>,
+      "notes": ["<insight shown, intellectual maturity>"]
+    }}
+  }},
+  "top_strengths": ["<strength 1>", "<strength 2>", "<strength 3>"],
+  "top_improvements": ["<improvement 1>", "<improvement 2>", "<improvement 3>"],
+  "line_level_fixes": ["<short specific change — not a full rewrite>", "<another fix>"],
+  "summary_reasoning": "<2-3 calm sentences: overall quality for {target_course}, what works, what does not>",
+{grade_note_instruction}
+}}
+
+Scoring guide (0–20 per dimension):
+  18-20: Exceptional — specific, compelling, directly relevant
+  14-17: Strong — clear and solid with minor gaps
+  10-13: OK — adequate but generic or vague in places
+   6-9:  Weak — lacks specificity or course relevance
+   0-5:  Very weak — significant issues to address
+"""
+
+
+def _fallback_ps_evaluate(
+    ps_text: str,
+    target_course: str,
+    target_university: Optional[str],
+    grades_summary: Optional[str],
+    request_id: str,
+    t0: float,
+) -> Dict[str, Any]:
+    heur       = ps_heuristics(ps_text)
+    words      = re.findall(r"[A-Za-z']+", ps_text)
+    word_count = len(words)
+
+    evidence_markers = heur.get("evidence_markers_count", 0)
+    cliches          = len(heur.get("cliche_flags", []))
+    specificity      = heur.get("specificity_estimate", 0)
+    repetition       = heur.get("repetition_ngram_clusters", 0)
+
+    def clamp20(v: int) -> int:
+        return max(0, min(20, v))
+
+    rubric = {
+        "course_fit":               {"score": clamp20(12 + min(4, evidence_markers) - min(4, cliches)),  "notes": [f"{evidence_markers} evidence marker(s) detected."]},
+        "specificity_and_evidence": {"score": clamp20(10 + min(6, specificity // 3) - min(4, cliches)), "notes": [f"{specificity} specific proper noun(s); {cliches} cliché(s)."]},
+        "structure_and_coherence":  {"score": clamp20(12 - min(6, repetition * 2)),                     "notes": [f"{repetition} repeated phrase cluster(s)."]},
+        "voice_and_authenticity":   {"score": clamp20(11 - min(4, cliches * 2)),                        "notes": ["Voice estimated from cliché density."]},
+        "reflection_and_growth":    {"score": clamp20(10 + min(6, evidence_markers * 2)),               "notes": ["Reflection estimated from evidence marker frequency."]},
+    }
+    score = _weighted_ps_score(rubric)
+    band  = _ps_band_from_score(score)
+
+    strengths: List[str] = []
+    improvements: List[str] = []
+
+    if evidence_markers >= 3:
+        strengths.append("Uses specific experiences and cause-and-effect reasoning.")
+    if specificity >= 8:
+        strengths.append("Includes concrete details and named references.")
+    if 300 <= word_count <= 900:
+        strengths.append("Length is within a healthy range for a focused PS.")
+    if not strengths:
+        strengths.append("Provides a foundation that can be strengthened with more evidence.")
+
+    if cliches:
+        improvements.append("Replace common opening phrases with something specific to you.")
+    if evidence_markers <= 1:
+        improvements.append(f"Add more evidence-based sentences linking your experiences to {target_course}.")
+    if repetition:
+        improvements.append("Tighten the writing — similar phrases are repeated across paragraphs.")
+    if word_count < 300:
+        improvements.append("Very short — add more depth and subject-specific examples.")
+    if not improvements:
+        improvements.append(f"Deepen the connection to {target_course} with concrete subject examples.")
+
+    weight_class = _ps_weight_class(target_university)
+    impact_pts   = _ps_impact_points(weight_class, band)
+    grade_note   = None
+    if grades_summary:
+        grade_note = (
+            f"Based on the grades summary ({grades_summary}), "
+            f"the PS {'appears consistent with' if score >= 50 else 'may not fully reflect'} the academic level indicated."
+        )
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    uni_display = target_university or "universities in general"
+
+    return {
+        "status": "ok",
+        "ps_band": band,
+        "score": score,
+        "rubric": rubric,
+        "top_strengths": strengths[:6],
+        "top_improvements": improvements[:6],
+        "line_level_fixes": None,
+        "summary_reasoning": (
+            f"Heuristic evaluation (AI unavailable). "
+            f"The PS scores {score}/100 for {target_course}. "
+            f"Review the improvements to strengthen it."
+        ),
+        "grade_compliment_note": grade_note,
+        "impact_on_chances": {
+            "weight_class": weight_class,
+            "suggested_impact_points": impact_pts,
+            "rationale": (
+                f"{uni_display} is in the {weight_class.replace('_', ' ')} category. "
+                f"A {band} PS {'adds a positive signal' if impact_pts > 0 else 'may weaken your application' if impact_pts < 0 else 'has a neutral effect'} here."
+            ),
+        },
+        "meta": {
+            "request_id": request_id,
+            "model": "heuristic-fallback",
+            "latency_ms": latency_ms,
+        },
+    }
+
+
+# ── Endpoint ──────────────────────────────────────────────────
+
+@app.post("/api/py/ps-evaluate")
+async def ps_evaluate(request: Request):
+    """
+    Hardened PS Analyser — POST /api/py/ps-evaluate
+
+    Always returns JSON. Never crashes on malformed AI output.
+    Falls back to heuristic analysis when Gemini is unavailable.
+    """
+    request_id = uuid.uuid4().hex[:12]
+    t0 = time.monotonic()
+
+    # ── 1. Content-Type guard ─────────────────────────────────
+    content_type = request.headers.get("content-type", "")
+    if "application/json" not in content_type:
+        return JSONResponse(
+            {
+                "status": "error",
+                "error_code": "VALIDATION_ERROR",
+                "message": "Content-Type must be application/json.",
+                "retryable": False,
+                "request_id": request_id,
+                "details": {"content_type_received": content_type},
+            },
+            status_code=422,
+        )
+
+    # ── 2. Parse body ─────────────────────────────────────────
+    try:
+        raw_body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {
+                "status": "error",
+                "error_code": "VALIDATION_ERROR",
+                "message": "Request body is not valid JSON.",
+                "retryable": False,
+                "request_id": request_id,
+                "details": None,
+            },
+            status_code=422,
+        )
+
+    # ── 3. Validate with Pydantic ─────────────────────────────
+    try:
+        payload = PSEvaluateRequest(**raw_body)
+    except Exception as exc:
+        try:
+            from pydantic import ValidationError
+            if isinstance(exc, ValidationError):
+                field_errors = [
+                    f"{'.'.join(str(l) for l in e['loc'])}: {e['msg']}"
+                    for e in exc.errors()
+                ]
+                detail_msg = "; ".join(field_errors[:4])
+            else:
+                detail_msg = str(exc)[:200]
+        except Exception:
+            detail_msg = "Invalid request body."
+
+        ps_raw = raw_body.get("personal_statement_text", "")
+        if isinstance(ps_raw, str) and 0 < len(ps_raw) < PS_EVALUATE_MIN_CHARS:
+            user_msg = (
+                f"Personal statement is too short ({len(ps_raw)} chars). "
+                f"Minimum is {PS_EVALUATE_MIN_CHARS} characters."
+            )
+        elif not str(raw_body.get("target_course", "")).strip():
+            user_msg = "target_course is required and cannot be empty."
+        else:
+            user_msg = f"Request validation failed: {detail_msg}"
+
+        return JSONResponse(
+            {
+                "status": "error",
+                "error_code": "VALIDATION_ERROR",
+                "message": user_msg,
+                "retryable": False,
+                "request_id": request_id,
+                "details": {"validation_detail": detail_msg},
+            },
+            status_code=422,
+        )
+
+    # ── 4. Log (no PS text in logs) ───────────────────────────
+    ps_text = payload.personal_statement_text.strip()
+    logger.info(
+        "[%s] ps-evaluate course=%r uni=%r chars=%d mode=%s",
+        request_id,
+        payload.target_course[:60],
+        (payload.target_university or "")[:40],
+        len(ps_text),
+        payload.mode,
+    )
+
+    # ── 5. Fallback if Gemini not configured ──────────────────
+    if not is_gemini_available():
+        logger.info("[%s] ps-evaluate: gemini not configured, using fallback", request_id)
+        return JSONResponse(
+            _fallback_ps_evaluate(
+                ps_text, payload.target_course, payload.target_university,
+                payload.grades_summary, request_id, t0,
+            )
+        )
+
+    # ── 6. Build prompt and call Gemini ───────────────────────
+    prompt = _build_ps_evaluate_prompt(
+        ps_text,
+        payload.target_course,
+        payload.target_university,
+        payload.curriculum,
+        payload.grades_summary,
+    )
+
+    ai_result, ai_err, latency_ms = call_gemini_json(
+        prompt,
+        trace_id=request_id,
+        temperature=0.25,
+        max_retries=2,
+    )
+
+    # ── 7. Map AI errors to HTTP codes ────────────────────────
+    if ai_err is not None:
+        code_map = {
+            "PROVIDER_TIMEOUT":    503,
+            "AI_UNAVAILABLE":      503,
+            "PROVIDER_RATE_LIMIT": 429,
+            "PARSE_ERROR":         502,
+        }
+        http_status = code_map.get(ai_err.code, ai_err.status_code)
+        return JSONResponse(
+            {
+                "status": "error",
+                "error_code": ai_err.code,
+                "message": ai_err.message,
+                "retryable": ai_err.retryable,
+                "request_id": request_id,
+                "details": ai_err.details,
+            },
+            status_code=http_status,
+        )
+
+    if ai_result is None:
+        logger.warning("[%s] ps-evaluate: ai returned null, falling back", request_id)
+        return JSONResponse(
+            _fallback_ps_evaluate(
+                ps_text, payload.target_course, payload.target_university,
+                payload.grades_summary, request_id, t0,
+            )
+        )
+
+    # ── 8. Sanitise AI output ─────────────────────────────────
+    try:
+        clean_rubric = _sanitise_ps_evaluate_rubric(ai_result.get("rubric"))
+        score        = _weighted_ps_score(clean_rubric)
+        band         = _ps_band_from_score(score)
+
+        def _safe_list(val: Any, max_len: int = 6) -> List[str]:
+            if not isinstance(val, list): return []
+            return [str(x) for x in val if x][:max_len]
+
+        top_strengths    = _safe_list(ai_result.get("top_strengths"), 6)
+        top_improvements = _safe_list(ai_result.get("top_improvements"), 6)
+        line_fixes       = _safe_list(ai_result.get("line_level_fixes"), 6) or None
+
+        if not top_strengths:
+            top_strengths = ["Demonstrates engagement with the subject area."]
+        if not top_improvements:
+            top_improvements = [f"Add more specific examples relevant to {payload.target_course}."]
+
+        summary_reasoning = str(ai_result.get("summary_reasoning") or "").strip()
+        if not summary_reasoning:
+            summary_reasoning = f"PS evaluated for {payload.target_course}. See rubric for detail."
+
+        raw_grade_note = ai_result.get("grade_compliment_note")
+        grade_note = (
+            str(raw_grade_note).strip()
+            if raw_grade_note and str(raw_grade_note).strip() not in ("null", "None", "")
+            else None
+        )
+
+        weight_class = _ps_weight_class(payload.target_university)
+        impact_pts   = _ps_impact_points(weight_class, band)
+        uni_display  = payload.target_university or "universities in general"
+
+        rationale_map = {
+            "PS_HEAVY": f"{uni_display} reads personal statements very carefully — a {band} PS carries significant weight.",
+            "PS_MED":   f"{uni_display} considers the PS meaningfully alongside grades — a {band} PS matters.",
+            "PS_LIGHT": f"{uni_display} focuses primarily on grades; the PS is reviewed but has limited impact.",
+            "UNKNOWN":  "University tier unknown — PS impact estimated as low by default.",
+        }
+
+    except Exception as exc:
+        logger.error("[%s] ps-evaluate sanitise error: %s", request_id, type(exc).__name__)
+        return JSONResponse(
+            _fallback_ps_evaluate(
+                ps_text, payload.target_course, payload.target_university,
+                payload.grades_summary, request_id, t0,
+            )
+        )
+
+    # ── 9. Return success response ────────────────────────────
+    latency_total = int((time.monotonic() - t0) * 1000)
+
+    return JSONResponse({
+        "status": "ok",
+        "ps_band": band,
+        "score": score,
+        "rubric": clean_rubric,
+        "top_strengths": top_strengths,
+        "top_improvements": top_improvements,
+        "line_level_fixes": line_fixes,
+        "summary_reasoning": summary_reasoning,
+        "grade_compliment_note": grade_note,
+        "impact_on_chances": {
+            "weight_class": weight_class,
+            "suggested_impact_points": impact_pts,
+            "rationale": rationale_map.get(weight_class, rationale_map["UNKNOWN"]),
+        },
+        "meta": {
+            "request_id": request_id,
+            "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            "latency_ms": latency_total,
+        },
+    })

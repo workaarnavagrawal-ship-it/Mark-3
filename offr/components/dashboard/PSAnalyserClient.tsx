@@ -1,53 +1,19 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import type { Profile, PSAnalysisResponse } from "@/lib/types";
-import { savePSAnalysis } from "@/lib/profile";
+import type { Profile, PSEvaluateSuccess, PSEvaluateError } from "@/lib/types";
+import { psEvaluate } from "@/lib/api";
 
 // ── Constants ────────────────────────────────────────────────
 const Q_LIMIT   = 1000;  // UCAS 2025 per-question character limit
 const LEG_LIMIT = 4000;  // Legacy single-statement character limit
+const PS_MIN    = 300;   // Minimum chars before we allow submission
 
 // ── Helpers ──────────────────────────────────────────────────
-function splitLines(text: string): string[] {
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-  const chunks: string[] = [];
-  let cur = "";
-  sentences.forEach((s, i) => {
-    cur += s.trim() + " ";
-    if ((i + 1) % 2 === 0 || i === sentences.length - 1) {
-      const t = cur.trim();
-      if (t.length > 10) chunks.push(t);
-      cur = "";
-    }
-  });
-  // Always return at least one chunk so the backend never receives lines: []
-  return chunks.length > 0 ? chunks : [text.trim()];
-}
-
-// ── Verdict styling map ──────────────────────────────────────
-const VS: Record<string, { bg: string; color: string; border: string; label: string }> = {
-  strong:  { bg: "var(--safe-bg)", color: "var(--safe-t)", border: "var(--safe-b)", label: "Strong" },
-  weak:    { bg: "var(--rch-bg)",  color: "var(--rch-t)",  border: "var(--rch-b)",  label: "Weak" },
-  improve: { bg: "var(--tgt-bg)",  color: "var(--tgt-t)",  border: "var(--tgt-b)",  label: "Improve" },
-  neutral: { bg: "var(--s3)",      color: "var(--t3)",      border: "var(--b)",       label: "Neutral" },
-};
-
-function ScoreDots({ score }: { score: number }) {
-  const c = score >= 8 ? "var(--safe-t)" : score >= 5 ? "var(--tgt-t)" : "var(--rch-t)";
-  return (
-    <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
-      {Array.from({ length: 10 }).map((_, i) => (
-        <div key={i} style={{ width: "5px", height: "5px", borderRadius: "50%", background: i < score ? c : "var(--s3)" }} />
-      ))}
-    </div>
-  );
-}
-
 function CharBar({ value, limit }: { value: number; limit: number }) {
-  const pct = Math.min(100, (value / limit) * 100);
-  const over = value > limit;
-  const near = pct > 85;
+  const pct   = Math.min(100, (value / limit) * 100);
+  const over  = value > limit;
+  const near  = pct > 85;
   const color = over ? "var(--rch-t)" : near ? "var(--tgt-t)" : "var(--acc)";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -61,23 +27,49 @@ function CharBar({ value, limit }: { value: number; limit: number }) {
   );
 }
 
+const BAND_COLOR: Record<string, string> = {
+  EXCEPTIONAL: "var(--safe-t)",
+  STRONG:      "var(--safe-t)",
+  OK:          "var(--tgt-t)",
+  WEAK:        "var(--rch-t)",
+};
+
+const WEIGHT_LABEL: Record<string, string> = {
+  PS_HEAVY: "PS-heavy university — reads every word carefully",
+  PS_MED:   "PS matters alongside your grades here",
+  PS_LIGHT: "Grades-primary — PS reviewed but limited impact",
+  UNKNOWN:  "University tier unknown",
+};
+
 const UCAS_QUESTIONS = [
-  {
-    key: "q1" as const,
-    label: "Q1 — Why this subject?",
-    desc: "Why do you want to study this course or subject?",
-  },
-  {
-    key: "q2" as const,
-    label: "Q2 — Academic preparation",
-    desc: "How have your qualifications and studies prepared you for this course?",
-  },
-  {
-    key: "q3" as const,
-    label: "Q3 — Beyond the classroom",
-    desc: "What else have you done to prepare outside your studies, and why does it interest you?",
-  },
+  { key: "q1" as const, label: "Q1 — Why this subject?",      desc: "Why do you want to study this course or subject?" },
+  { key: "q2" as const, label: "Q2 — Academic preparation",   desc: "How have your qualifications and studies prepared you for this course?" },
+  { key: "q3" as const, label: "Q3 — Beyond the classroom",   desc: "What else have you done to prepare outside your studies, and why does it interest you?" },
 ];
+
+function RubricBar({ label, score }: { label: string; score: number }) {
+  const pct   = (score / 20) * 100;
+  const color = score >= 15 ? "var(--safe-t)" : score >= 10 ? "var(--tgt-t)" : "var(--rch-t)";
+  return (
+    <div style={{ marginBottom: "10px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+        <span style={{ fontSize: "12px", color: "var(--t2)" }}>{label}</span>
+        <span style={{ fontSize: "12px", color, fontVariantNumeric: "tabular-nums" }}>{score}/20</span>
+      </div>
+      <div style={{ height: "4px", background: "var(--s3)", borderRadius: "3px", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, transition: "width 300ms" }} />
+      </div>
+    </div>
+  );
+}
+
+const RUBRIC_LABELS: Record<string, string> = {
+  course_fit:               "Course fit",
+  specificity_and_evidence: "Specificity & evidence",
+  structure_and_coherence:  "Structure & coherence",
+  voice_and_authenticity:   "Voice & authenticity",
+  reflection_and_growth:    "Reflection & growth",
+};
 
 // ── Main component ────────────────────────────────────────────
 export function PSAnalyserClient({ profile }: { profile: Profile }) {
@@ -89,43 +81,45 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
   const [q3, setQ3] = useState(profile.ps_q3 || "");
   const [statement, setStatement] = useState(profile.ps_statement || "");
 
-  const [loading, setLoading]       = useState(false);
-  const [err, setErr]               = useState("");
-  const [activeIdx, setActiveIdx]   = useState<number | null>(null);
-  const [analysis, setAnalysis]     = useState<PSAnalysisResponse | null>(
-    profile.ps_last_analysis ?? null
-  );
+  const [targetCourse, setTargetCourse]       = useState("");
+  const [targetUniversity, setTargetUniversity] = useState("");
+
+  const [loading, setLoading]   = useState(false);
+  const [result, setResult]     = useState<PSEvaluateSuccess | null>(null);
+  const [apiError, setApiError] = useState<PSEvaluateError | null>(null);
 
   const isUCAS = format === "UCAS_3Q";
-  const qMap   = { q1, q2, q3 } as Record<"q1" | "q2" | "q3", string>;
-  const setMap = { q1: setQ1, q2: setQ2, q3: setQ3 } as Record<"q1" | "q2" | "q3", (v: string) => void>;
+  const qMap   = { q1, q2, q3 } as Record<"q1"|"q2"|"q3", string>;
+  const setMap = { q1: setQ1, q2: setQ2, q3: setQ3 } as Record<"q1"|"q2"|"q3", (v: string) => void>;
 
-  const combinedText = isUCAS
-    ? [q1, q2, q3].filter(Boolean).join("\n\n")
-    : statement;
-
-  const wordCount = combinedText.trim() ? combinedText.trim().split(/\s+/).length : 0;
+  const combinedText = isUCAS ? [q1, q2, q3].filter(Boolean).join("\n\n") : statement;
+  const wordCount    = combinedText.trim() ? combinedText.trim().split(/\s+/).length : 0;
+  const charCount    = combinedText.length;
+  const hasPS        = isUCAS ? !!(q1 || q2 || q3) : !!statement;
+  const canSubmit    = hasPS && charCount >= PS_MIN && targetCourse.trim().length > 0 && !loading;
 
   // ── Analyse ───────────────────────────────────────────────
   async function analyse() {
-    const text = combinedText.trim();
-    if (!text) { setErr("Please write your personal statement first."); return; }
-    setErr(""); setLoading(true); setAnalysis(null); setActiveIdx(null);
-    try {
-      const lines = splitLines(text);
-      const res = await fetch("/api/py/analyse_ps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ statement: text, lines, format }),
-      });
-      if (!res.ok) throw new Error(`Analysis failed (${res.status})`);
-      const result: PSAnalysisResponse = await res.json();
-      setAnalysis(result);
-      savePSAnalysis(result).catch(() => {});
-    } catch (e: any) {
-      setErr(e.message || "Analysis failed");
-    } finally {
-      setLoading(false);
+    if (!canSubmit) return;
+    setApiError(null);
+    setResult(null);
+    setLoading(true);
+
+    const resp = await psEvaluate({
+      personal_statement_text: combinedText.trim(),
+      target_course: targetCourse.trim(),
+      target_university: targetUniversity.trim() || null,
+      curriculum: (profile.curriculum as "IB" | "ALEVEL") || null,
+      grades_summary: null,
+      mode: "standalone",
+    });
+
+    setLoading(false);
+
+    if (resp.status === "error") {
+      setApiError(resp);
+    } else {
+      setResult(resp);
     }
   }
 
@@ -157,16 +151,29 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
     boxSizing: "border-box",
   };
 
-  const scoreColor = analysis
-    ? analysis.overallScore >= 75 ? "var(--safe-t)"
-    : analysis.overallScore >= 50 ? "var(--tgt-t)"
-    : "var(--rch-t)"
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "var(--s2)",
+    border: "1px solid var(--b)",
+    borderRadius: "8px",
+    padding: "9px 12px",
+    fontSize: "13px",
+    color: "var(--t)",
+    fontFamily: "inherit",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const scoreColor = result
+    ? result.ps_band === "EXCEPTIONAL" || result.ps_band === "STRONG"
+      ? "var(--safe-t)"
+      : result.ps_band === "OK"
+      ? "var(--tgt-t)"
+      : "var(--rch-t)"
     : "var(--t)";
 
-  const hasPS = isUCAS ? !!(q1 || q2 || q3) : !!statement;
-
   return (
-    <div style={{ padding: "48px 52px", maxWidth: "1020px" }}>
+    <div style={{ padding: "48px 52px", maxWidth: "1100px" }}>
 
       {/* ── Header ───────────────────────────────────────── */}
       <div style={{ marginBottom: "32px" }}>
@@ -175,28 +182,67 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
           PS Analyser
         </h1>
         <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65, maxWidth: "520px" }}>
-          Line-by-line AI feedback on your personal statement. Scores each passage, flags clich&eacute;s, and suggests specific rewrites.
+          AI feedback on your personal statement, evaluated specifically for your target course.
         </p>
       </div>
 
+      {/* ── Context inputs ────────────────────────────────── */}
+      <div className="card" style={{ padding: "18px", marginBottom: "20px" }}>
+        <p className="label" style={{ marginBottom: "12px" }}>Target course context</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          <div>
+            <label style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: "5px" }}>
+              Course <span style={{ color: "var(--rch-t)" }}>*</span>
+            </label>
+            <input
+              type="text"
+              value={targetCourse}
+              onChange={e => setTargetCourse(e.target.value)}
+              placeholder="e.g. Economics"
+              style={inputStyle}
+              onFocus={e => (e.currentTarget.style.borderColor = "var(--b-strong)")}
+              onBlur={e  => (e.currentTarget.style.borderColor = "var(--b)")}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: "5px" }}>
+              University <span style={{ color: "var(--t3)" }}>(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={targetUniversity}
+              onChange={e => setTargetUniversity(e.target.value)}
+              placeholder="e.g. LSE, Oxford, Warwick…"
+              style={inputStyle}
+              onFocus={e => (e.currentTarget.style.borderColor = "var(--b-strong)")}
+              onBlur={e  => (e.currentTarget.style.borderColor = "var(--b)")}
+            />
+          </div>
+        </div>
+        {!targetCourse.trim() && (
+          <p style={{ fontSize: "11px", color: "var(--tgt-t)", marginTop: "8px", margin: "8px 0 0" }}>
+            Enter a target course to enable analysis.
+          </p>
+        )}
+      </div>
+
       {/* ── Format toggle ─────────────────────────────────── */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "24px" }}>
-        <button onClick={() => { setFormat("UCAS_3Q"); setAnalysis(null); }} style={togStyle(isUCAS)}>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+        <button onClick={() => { setFormat("UCAS_3Q"); setResult(null); setApiError(null); }} style={togStyle(isUCAS)}>
           UCAS 3 questions
           <span style={{ fontSize: "10px", color: "var(--t3)", marginLeft: "6px", padding: "1px 5px", background: "var(--s3)", borderRadius: "4px" }}>2025</span>
         </button>
-        <button onClick={() => { setFormat("LEGACY"); setAnalysis(null); }} style={togStyle(!isUCAS)}>
+        <button onClick={() => { setFormat("LEGACY"); setResult(null); setApiError(null); }} style={togStyle(!isUCAS)}>
           Single statement
         </button>
       </div>
 
       {/* ── Main grid ─────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: analysis ? "1fr 1fr" : "1fr", gap: "24px", alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: result ? "1fr 1fr" : "1fr", gap: "24px", alignItems: "start" }}>
 
         {/* ── Left: editor ─────────────────────────────────── */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
 
-          {/* UCAS 3Q inputs */}
           {isUCAS ? (
             <>
               {UCAS_QUESTIONS.map(({ key, label, desc }) => {
@@ -215,7 +261,7 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
                       rows={5}
                       style={taStyle}
                       onFocus={e => (e.currentTarget.style.borderColor = "var(--b-strong)")}
-                      onBlur={e => (e.currentTarget.style.borderColor = "var(--b)")}
+                      onBlur={e  => (e.currentTarget.style.borderColor = "var(--b)")}
                     />
                     <div style={{ marginTop: "10px" }}>
                       <CharBar value={val.length} limit={Q_LIMIT} />
@@ -223,16 +269,14 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
                   </div>
                 );
               })}
-
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>
                 <span style={{ fontSize: "12px", color: "var(--t3)" }}>{wordCount} words total</span>
-                <span style={{ fontSize: "12px", color: (q1 + q2 + q3).length > Q_LIMIT * 3 ? "var(--rch-t)" : "var(--t3)" }}>
-                  {(q1 + q2 + q3).length.toLocaleString()} / {(Q_LIMIT * 3).toLocaleString()} chars combined
+                <span style={{ fontSize: "12px", color: (q1+q2+q3).length > Q_LIMIT*3 ? "var(--rch-t)" : "var(--t3)" }}>
+                  {(q1+q2+q3).length.toLocaleString()} / {(Q_LIMIT*3).toLocaleString()} chars combined
                 </span>
               </div>
             </>
           ) : (
-            /* Legacy single textarea */
             <div className="card">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                 <p className="label" style={{ margin: 0 }}>Your personal statement</p>
@@ -244,10 +288,10 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
                 value={statement}
                 onChange={e => setStatement(e.target.value)}
                 placeholder="Paste your personal statement here…"
-                rows={analysis ? 18 : 14}
+                rows={result ? 18 : 14}
                 style={taStyle}
                 onFocus={e => (e.currentTarget.style.borderColor = "var(--b-strong)")}
-                onBlur={e => (e.currentTarget.style.borderColor = "var(--b)")}
+                onBlur={e  => (e.currentTarget.style.borderColor = "var(--b)")}
               />
               <div style={{ marginTop: "10px" }}>
                 <CharBar value={statement.length} limit={LEG_LIMIT} />
@@ -255,17 +299,40 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
             </div>
           )}
 
-          {/* Error banner */}
-          {err && (
-            <div style={{ padding: "12px 14px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
-              <p style={{ fontSize: "13px", color: "var(--rch-t)", margin: 0 }}>{err}</p>
+          {/* ── Error banner ─────────────────────────────── */}
+          {apiError && (
+            <div style={{ padding: "14px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "10px" }}>
+              <p style={{ fontSize: "13px", color: "var(--rch-t)", margin: 0, marginBottom: apiError.retryable ? "10px" : 0, fontWeight: 500 }}>
+                {apiError.error_code === "VALIDATION_ERROR"
+                  ? apiError.message
+                  : apiError.error_code === "PROVIDER_RATE_LIMIT"
+                  ? "AI is currently rate-limited. Please wait a moment and try again."
+                  : apiError.error_code === "PROVIDER_TIMEOUT"
+                  ? "AI took too long to respond. Please try again."
+                  : apiError.message || "Analysis failed. Please try again."}
+              </p>
+              {apiError.retryable && (
+                <button
+                  onClick={analyse}
+                  style={{ fontSize: "12px", color: "var(--rch-t)", background: "none", border: "1px solid var(--rch-b)", borderRadius: "6px", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  Retry
+                </button>
+              )}
             </div>
           )}
 
-          {/* Analyse button */}
+          {/* ── Short PS warning ─────────────────────────── */}
+          {charCount > 0 && charCount < PS_MIN && (
+            <p style={{ fontSize: "12px", color: "var(--tgt-t)", margin: "0 4px" }}>
+              {charCount} / {PS_MIN} chars minimum — keep writing.
+            </p>
+          )}
+
+          {/* ── Analyse button ───────────────────────────── */}
           <button
             onClick={analyse}
-            disabled={loading || !combinedText.trim()}
+            disabled={!canSubmit}
             className="btn btn-prim"
             style={{ width: "100%", padding: "13px" }}
           >
@@ -284,8 +351,7 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
             ) : "Analyse my PS \u2192"}
           </button>
 
-          {/* Profile hint */}
-          {!analysis && (
+          {!result && (
             <p style={{ fontSize: "12px", color: "var(--t3)", textAlign: "center", margin: 0 }}>
               {hasPS
                 ? <>Pre-loaded from your profile. <Link href="/dashboard/profile" style={{ color: "var(--acc)", textDecoration: "none" }}>Edit in profile &rarr;</Link></>
@@ -294,40 +360,58 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
             </p>
           )}
 
-          {/* ── Overall score card ───────────────────────────── */}
-          {analysis && (
+          {/* ── Overall score card ───────────────────────── */}
+          {result && (
             <div className="card" style={{ marginTop: "4px" }}>
               <p className="label" style={{ marginBottom: "14px" }}>Overall</p>
 
               <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px" }}>
                 <span className="serif" style={{ fontSize: "52px", fontWeight: 400, color: scoreColor, lineHeight: 1 }}>
-                  {analysis.overallScore}
+                  {result.score}
                 </span>
                 <span className="serif" style={{ fontSize: "20px", color: "var(--t3)" }}>/100</span>
-                <span className="pill" style={{ background: "var(--s3)", color: "var(--t2)", border: "1px solid var(--b)", marginLeft: "8px" }}>
-                  {analysis.band}
+                <span className="pill" style={{ background: "var(--s3)", color: BAND_COLOR[result.ps_band] || "var(--t2)", border: "1px solid var(--b)", marginLeft: "8px" }}>
+                  {result.ps_band}
                 </span>
               </div>
 
               <p style={{ fontSize: "13px", color: "var(--t3)", lineHeight: 1.7, marginBottom: "16px" }}>
-                {analysis.summary}
+                {result.summary_reasoning}
               </p>
 
-              <div style={{ padding: "12px 14px", background: "var(--tgt-bg)", border: "1px solid var(--tgt-b)", borderRadius: "8px", marginBottom: "16px" }}>
-                <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Top priority</p>
-                <p style={{ fontSize: "13px", color: "var(--tgt-t)", lineHeight: 1.65, margin: 0 }}>{analysis.topPriority}</p>
+              {/* Impact on chances */}
+              <div style={{ padding: "11px 13px", background: "var(--s3)", border: "1px solid var(--b)", borderRadius: "8px", marginBottom: "14px" }}>
+                <p style={{ fontSize: "10px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "4px" }}>
+                  {WEIGHT_LABEL[result.impact_on_chances.weight_class] || "PS impact"}
+                </p>
+                <p style={{ fontSize: "12px", color: "var(--t2)", lineHeight: 1.55, margin: 0 }}>
+                  {result.impact_on_chances.rationale}
+                </p>
+                {result.impact_on_chances.suggested_impact_points !== 0 && (
+                  <p style={{ fontSize: "11px", color: result.impact_on_chances.suggested_impact_points > 0 ? "var(--safe-t)" : "var(--rch-t)", marginTop: "5px", margin: "5px 0 0" }}>
+                    Estimated score impact: {result.impact_on_chances.suggested_impact_points > 0 ? "+" : ""}{result.impact_on_chances.suggested_impact_points} pts
+                  </p>
+                )}
               </div>
+
+              {result.grade_compliment_note && (
+                <div style={{ padding: "10px 13px", background: "var(--s2)", border: "1px solid var(--b)", borderRadius: "8px", marginBottom: "14px" }}>
+                  <p style={{ fontSize: "12px", color: "var(--t3)", lineHeight: 1.55, margin: 0, fontStyle: "italic" }}>
+                    {result.grade_compliment_note}
+                  </p>
+                </div>
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <div>
                   <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Strengths</p>
-                  {analysis.strengths.map((s, i) => (
+                  {result.top_strengths.map((s, i) => (
                     <p key={i} style={{ fontSize: "12px", color: "var(--safe-t)", marginBottom: "5px", lineHeight: 1.55 }}>&middot; {s}</p>
                   ))}
                 </div>
                 <div>
-                  <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Weaknesses</p>
-                  {analysis.weaknesses.map((w, i) => (
+                  <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Improvements</p>
+                  {result.top_improvements.map((w, i) => (
                     <p key={i} style={{ fontSize: "12px", color: "var(--rch-t)", marginBottom: "5px", lineHeight: 1.55 }}>&middot; {w}</p>
                   ))}
                 </div>
@@ -336,66 +420,37 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
           )}
         </div>
 
-        {/* ── Right: line-by-line feedback ──────────────────── */}
-        {analysis && (
-          <div>
-            <p className="label" style={{ marginBottom: "14px" }}>Line-by-line feedback</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
-              {analysis.lineFeedback.map((lf, idx) => {
-                const vs = VS[lf.verdict] || VS.neutral;
-                const isActive = activeIdx === idx;
-                return (
-                  <div
-                    key={idx}
-                    onClick={() => setActiveIdx(isActive ? null : idx)}
-                    style={{
-                      background: isActive ? "var(--s2)" : "var(--s1)",
-                      border: `1px solid ${isActive ? vs.border : "var(--b)"}`,
-                      borderRadius: "12px",
-                      padding: "13px 14px",
-                      cursor: "pointer",
-                      transition: "all 150ms",
-                    }}
-                    onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; }}
-                    onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span style={{ fontSize: "11px", color: "var(--t3)", minWidth: "18px" }}>
-                          {String(idx + 1).padStart(2, "0")}
-                        </span>
-                        <span className="pill" style={{ background: vs.bg, color: vs.color, border: `1px solid ${vs.border}`, fontSize: "10px", padding: "2px 8px" }}>
-                          {vs.label}
-                        </span>
-                      </div>
-                      <ScoreDots score={lf.score} />
-                    </div>
-
-                    <p style={{ fontSize: "12px", color: "var(--t2)", lineHeight: 1.6, borderLeft: `2px solid ${vs.border}`, paddingLeft: "10px", fontStyle: "italic", marginBottom: isActive ? "12px" : 0 }}>
-                      &ldquo;{lf.line.length > 110 ? lf.line.slice(0, 110) + "\u2026" : lf.line}&rdquo;
+        {/* ── Right: rubric + line fixes ─────────────────── */}
+        {result && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Rubric */}
+            <div className="card" style={{ padding: "18px" }}>
+              <p className="label" style={{ marginBottom: "16px" }}>Rubric breakdown</p>
+              {Object.entries(result.rubric).map(([key, dim]) => (
+                <div key={key}>
+                  <RubricBar label={RUBRIC_LABELS[key] || key} score={dim.score} />
+                  {dim.notes.length > 0 && (
+                    <p style={{ fontSize: "11px", color: "var(--t3)", marginBottom: "10px", marginTop: "2px", lineHeight: 1.55, paddingLeft: "2px" }}>
+                      {dim.notes[0]}
                     </p>
-
-                    {isActive && (
-                      <div style={{ borderTop: "1px solid var(--b)", paddingTop: "12px" }}>
-                        <p style={{ fontSize: "13px", color: "var(--t3)", lineHeight: 1.7, marginBottom: lf.suggestion ? "12px" : 0 }}>
-                          {lf.feedback}
-                        </p>
-                        {lf.suggestion && (
-                          <div style={{ background: "var(--s3)", border: "1px solid var(--b-strong)", borderRadius: "8px", padding: "10px 12px" }}>
-                            <p style={{ fontSize: "10px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>Suggested rewrite</p>
-                            <p style={{ fontSize: "12px", color: "var(--acc)", lineHeight: 1.65, fontStyle: "italic", margin: 0 }}>
-                              {lf.suggestion}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              ))}
             </div>
 
-            <div style={{ marginTop: "16px", padding: "12px 14px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "10px", textAlign: "center" }}>
+            {/* Line-level fixes */}
+            {result.line_level_fixes && result.line_level_fixes.length > 0 && (
+              <div className="card" style={{ padding: "18px" }}>
+                <p className="label" style={{ marginBottom: "12px" }}>Specific fixes</p>
+                {result.line_level_fixes.map((fix, i) => (
+                  <div key={i} style={{ padding: "10px 12px", background: "var(--s3)", borderRadius: "8px", marginBottom: "8px", borderLeft: "2px solid var(--tgt-b)" }}>
+                    <p style={{ fontSize: "12px", color: "var(--t2)", lineHeight: 1.65, margin: 0 }}>{fix}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ padding: "12px 14px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "10px", textAlign: "center" }}>
               <p style={{ fontSize: "12px", color: "var(--t3)", margin: 0 }}>
                 After editing, click &ldquo;Analyse my PS &rarr;&rdquo; again to refresh feedback.
               </p>
