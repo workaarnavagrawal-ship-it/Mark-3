@@ -1045,6 +1045,101 @@ def _fallback_ps_analysis(
 # Now filters to same faculty first, then vectorised extraction.
 # ─────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────
+# Interest keyword map — mirrors lib/explore.ts INTEREST_KEYWORDS
+# Kept in sync manually; used for server-side course scoring.
+# ─────────────────────────────────────────────────────────────
+
+INTEREST_KEYWORDS: Dict[str, List[str]] = {
+    "politics":        ["politics","political","government","governance","international relations","public policy","policy","diplomacy"],
+    "economics":       ["economics","economic","finance","financial","business","management","accounting","banking","commerce"],
+    "sociology":       ["sociology","sociolog","social","anthropolog","human geograph","development studies","cultural"],
+    "psychology":      ["psychology","psycholog","cognitive","neuroscience","behavioural","behavioral","mental health","counselling"],
+    "law":             ["law","legal","criminology","criminal justice","jurisprudence"],
+    "history":         ["history","histor","archaeology","classics","ancient","medieval","heritage"],
+    "philosophy":      ["philosophy","ethics","logic","moral"],
+    "geography":       ["geography","geograph","environmental","urban planning","urban studies","sustainability","climate"],
+    "mathematics":     ["mathematics","maths","math","statistics","statistical","actuarial","data science","quantitative"],
+    "physics":         ["physics","astrophysics","astronomy","cosmology","quantum"],
+    "chemistry":       ["chemistry","chemical","biochemistry","pharmaceutical","pharmacology","materials science"],
+    "biology":         ["biology","biological","ecology","zoology","botany","genetics","microbiology","neuroscience","anatomy"],
+    "engineering":     ["engineering","engineer","mechanical","civil","electrical","electronic","aerospace","structural"],
+    "computer science":["computer science","computing","software","artificial intelligence","machine learning","data","cybersecurity","information technology"],
+    "medicine":        ["medicine","medical","dentistry","nursing","healthcare","health science","biomedical","pharmacy","physiotherapy"],
+    "english":         ["english literature","english language","literature","creative writing","linguistics","journalism","media"],
+    "languages":       ["languages","modern languages","french","spanish","german","chinese","japanese","arabic","translation","linguistics"],
+    "art":             ["art","fine art","design","architecture","fashion","illustration","film","photography","theatre","drama","music","performing arts"],
+    "business studies":["business","management","marketing","entrepreneurship","commerce","accounting","finance","economics"],
+}
+
+
+def _get_keywords(interest: str) -> List[str]:
+    lower = interest.lower().strip()
+    if lower in INTEREST_KEYWORDS:
+        return INTEREST_KEYWORDS[lower]
+    for key, kws in INTEREST_KEYWORDS.items():
+        if lower in key or key in lower:
+            return kws
+    return [lower]
+
+
+def _score_course_interest(course_name: str, faculty: str, interests: List[str]) -> Tuple[int, str, str]:
+    """Returns (score, top_interest, matched_keyword) for a course against interests."""
+    text = f"{course_name} {faculty}".lower()
+    best_score, best_interest, best_kw = 0, "", ""
+    for interest in interests:
+        kws = _get_keywords(interest)
+        matched = [kw for kw in kws if kw in text]
+        if len(matched) > best_score:
+            best_score = len(matched)
+            best_interest = interest
+            best_kw = max(matched, key=len) if matched else ""
+    return best_score, best_interest, best_kw
+
+
+def _deterministic_suggestions(
+    interests: List[str],
+    exclude_names: List[str],
+    top_n: int = 6,
+) -> List[Dict[str, Any]]:
+    """Server-side equivalent of computeHiddenGems in lib/explore.ts."""
+    if not interests:
+        return []
+    df = load_df()
+    excl_lower = {n.lower().strip() for n in exclude_names}
+
+    # Aggregate to unique courses
+    grp = df.groupby("course_name", as_index=False).agg(
+        faculty=("faculty", "first"),
+        universities_count=("university_id", "nunique"),
+        faculties=("faculty", lambda x: list({str(v) for v in x if pd.notna(v)})),
+    )
+
+    scored: List[Tuple[int, str, str, Dict[str, Any]]] = []
+    seen_names: set = set()
+    for _, row in grp.iterrows():
+        name = str(row["course_name"])
+        if name.lower().strip() in excl_lower:
+            continue
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        score, top_interest, top_kw = _score_course_interest(
+            name, str(row.get("faculty") or ""), interests
+        )
+        if score > 0:
+            reason = f"Matches your interest in {top_interest} — based on \"{top_kw}\" alignment"
+            scored.append((score, top_interest, reason, {
+                "course_name": name,
+                "universities_count": int(row.get("universities_count") or 1),
+                "faculties": row.get("faculties") or [],
+                "reason": reason,
+            }))
+
+    scored.sort(key=lambda x: (-x[0], x[3]["course_name"]))
+    return [s[3] for s in scored[:top_n]]
+
+
 def suggest_alternatives(course_id: str, home_min_target: Optional[int]) -> Dict[str, Any]:
     df = load_df()
     this_row = df[df["course_id"] == course_id]
@@ -1703,5 +1798,203 @@ Rules:
         "profile_gaps": result.get("profile_gaps") or fallback["profile_gaps"],
         "clarity_summary": result.get("clarity_summary") or fallback["clarity_summary"],
         "portfolio_insight": result.get("portfolio_insight") or fallback["portfolio_insight"],
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Course suggestions — /api/py/suggest
+# Deterministic interest-scored courses + AI tradeoff reasoning.
+# Used by Strategy > Alternatives tab.
+# ─────────────────────────────────────────────────────────────
+
+class SuggestRequest(BaseModel):
+    interests: List[str]
+    curriculum: str
+    exclude_course_names: List[str] = []
+    top_n: int = Field(default=6, ge=1, le=12)
+
+
+@app.post("/api/py/suggest")
+async def suggest(payload: SuggestRequest):
+    """
+    Returns interest-matched course suggestions with AI tradeoff reasoning.
+
+    Deterministic layer: keyword-scored course matching (same logic as lib/explore.ts).
+    AI layer: personalised tradeoff notes per suggestion + overall strategy note.
+    Fallback: heuristic-only results if Gemini unavailable.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    suggestions = _deterministic_suggestions(
+        payload.interests,
+        payload.exclude_course_names,
+        payload.top_n,
+    )
+
+    if not suggestions:
+        return {
+            "status": "ok",
+            "suggestions": [],
+            "portfolio_strategy": None,
+        }
+
+    if not is_gemini_available():
+        return {
+            "status": "ok",
+            "suggestions": suggestions,
+            "portfolio_strategy": None,
+            "_fallback": True,
+        }
+
+    # Build a concise list for the prompt
+    course_list = "\n".join(
+        f"- {s['course_name']} (offered at {s['universities_count']} uni(s))"
+        for s in suggestions
+    )
+
+    prompt = f"""You are a UK UCAS admissions advisor helping a {payload.curriculum.replace("_", "-")} student explore alternative courses.
+
+Student interests: {", ".join(payload.interests)}
+
+The following courses were matched deterministically to their interests:
+{course_list}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "tradeoffs": {{
+    "<course_name>": "<1 sentence: why this is a strong fit for these interests, mention one tradeoff or consideration — be specific, not generic>"
+  }},
+  "portfolio_strategy": "<2 sentences max: overall advice on how these alternatives could strengthen a UCAS portfolio for someone with these interests>"
+}}
+
+Rules:
+- tradeoffs keys must exactly match the course names listed above
+- Each tradeoff must be ≤ 25 words
+- portfolio_strategy ≤ 40 words
+- Never invent entry requirements or outcome statistics
+- Be encouraging but realistic"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid, temperature=0.4)
+
+    if err or result is None:
+        return {
+            "status": "ok",
+            "suggestions": suggestions,
+            "portfolio_strategy": None,
+            "_fallback": True,
+        }
+
+    # Merge AI tradeoffs into suggestions
+    tradeoffs: Dict[str, str] = result.get("tradeoffs") or {}
+    for s in suggestions:
+        s["tradeoff"] = tradeoffs.get(s["course_name"]) or s["reason"]
+
+    return {
+        "status": "ok",
+        "suggestions": suggestions,
+        "portfolio_strategy": result.get("portfolio_strategy") or None,
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Portfolio advice — /api/py/portfolio_advice
+# AI commentary on UCAS choice mix (Safe/Target/Reach balance).
+# Used by Strategy > Mix tab and Tracker page.
+# ─────────────────────────────────────────────────────────────
+
+class PortfolioAssessmentItem(BaseModel):
+    course_name: str
+    university_name: str
+    band: str
+    chance_percent: int
+
+
+class PortfolioAdviceRequest(BaseModel):
+    curriculum: str
+    interests: List[str]
+    bands: Dict[str, int]            # {"Safe": 1, "Target": 2, "Reach": 1}
+    assessments: List[PortfolioAssessmentItem]
+
+
+@app.post("/api/py/portfolio_advice")
+async def portfolio_advice(payload: PortfolioAdviceRequest):
+    """
+    AI commentary on a student's UCAS portfolio mix.
+
+    Deterministic fallback included — if Gemini fails, returns rule-based advice.
+    """
+    tid = uuid.uuid4().hex[:8]
+    total = len(payload.assessments)
+
+    # ── Deterministic fallback ─────────────────────────────────────
+    safe   = payload.bands.get("Safe", 0)
+    target = payload.bands.get("Target", 0)
+    reach  = payload.bands.get("Reach", 0)
+
+    def _rule_advice() -> Dict[str, Any]:
+        actions: List[str] = []
+        if safe == 0 and total >= 2:
+            actions.append("Add at least one Safe choice where you are comfortably above the typical offer.")
+        if target < 2 and total >= 3:
+            actions.append("Aim for 2–3 Target choices as the spine of a strong portfolio.")
+        if reach == 0 and total >= 4:
+            actions.append("Consider adding a Reach to your list — ambitious applications are often rewarded.")
+        if reach > 2:
+            actions.append("Your portfolio is heavy on Reaches. Make sure you have a genuine Safe fallback.")
+        if total < 5 and total > 0:
+            actions.append(f"You have {total} of 5 UCAS slots filled. Aim to complete your list.")
+
+        balance = "well-balanced" if (safe >= 1 and target >= 2 and reach >= 1) else "needs attention"
+        summary = f"Portfolio of {total}: {safe} Safe, {target} Target, {reach} Reach — {balance}."
+        return {
+            "status": "ok",
+            "strategy_summary": summary,
+            "risk_balance": "Balanced" if balance == "well-balanced" else "Review needed",
+            "actions": actions or ["Your portfolio looks healthy. Keep refining your personal statement."],
+        }
+
+    if not is_gemini_available() or total == 0:
+        return _rule_advice()
+
+    choices_str = "\n".join(
+        f"- {a.course_name} at {a.university_name}: {a.band} ({a.chance_percent}%)"
+        for a in payload.assessments
+    )
+
+    prompt = f"""You are a UCAS admissions strategist reviewing a student's portfolio.
+
+Curriculum: {payload.curriculum.replace("_", "-")}
+Interests: {", ".join(payload.interests) if payload.interests else "not specified"}
+Portfolio ({total} choices):
+{choices_str}
+
+Band summary: {safe} Safe, {target} Target, {reach} Reach
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "strategy_summary": "<2 sentences: honest assessment of this portfolio's balance and strength>",
+  "risk_balance": "<Safe-heavy | Balanced | Reach-heavy>",
+  "actions": ["<action 1>", "<action 2>"]
+}}
+
+Rules:
+- strategy_summary ≤ 40 words, honest not cheerleading
+- 1–3 actions, each ≤ 20 words
+- risk_balance must be exactly one of: Safe-heavy, Balanced, Reach-heavy
+- Never invent outcome statistics or university-specific data not provided"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        return _rule_advice()
+
+    fallback = _rule_advice()
+    return {
+        "status": "ok",
+        "strategy_summary": result.get("strategy_summary") or fallback["strategy_summary"],
+        "risk_balance": result.get("risk_balance") or fallback["risk_balance"],
+        "actions": result.get("actions") or fallback["actions"],
         "provider_meta": {"latency_ms": latency_ms},
     }

@@ -185,19 +185,47 @@ export interface OfferAssessResponse {
 // ── Persona ──────────────────────────────────────────────────────
 export type Persona = "explorer" | "optimizer" | "verifier";
 
-// ── Strategy / Compare ───────────────────────────────────────────
-// ASSUMPTION: backend returns this shape for /api/py/suggest
+// ── Strategy / Suggest ───────────────────────────────────────────
 export interface SuggestRequest {
-  course_id: string;
-  university_id: string;
   interests: string[];
   curriculum: string;
+  exclude_course_names?: string[];
+  top_n?: number;
+}
+
+export interface SuggestCourse {
+  course_name: string;
+  universities_count: number;
+  faculties: string[];
+  reason: string;
+  tradeoff?: string;   // AI-generated tradeoff note (may be absent if fallback)
 }
 
 export interface SuggestResponse {
-  pivots: CourseListItem[];        // same course, different uni
-  hidden_gems: CourseListItem[];   // less-known but well-matched
-  adjacent: CourseListItem[];      // related subject areas
+  status: "ok" | "error";
+  suggestions: SuggestCourse[];
+  portfolio_strategy: string | null;
+  provider_meta?: { latency_ms: number };
+  // error fields
+  error_code?: string;
+  message?: string;
+  retryable?: boolean;
+}
+
+// ── Portfolio advice ─────────────────────────────────────────────
+export interface PortfolioAdviceRequest {
+  curriculum: string;
+  interests: string[];
+  bands: Record<string, number>;
+  assessments: { course_name: string; university_name: string; band: string; chance_percent: number }[];
+}
+
+export interface PortfolioAdviceResponse {
+  status: "ok" | "error";
+  strategy_summary: string;
+  risk_balance: string;
+  actions: string[];
+  provider_meta?: { latency_ms: number };
 }
 
 // ── What would improve ───────────────────────────────────────────

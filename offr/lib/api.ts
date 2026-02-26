@@ -5,6 +5,10 @@ import type {
   DashboardInsightsResponse,
   OfferAssessRequest,
   OfferAssessResponse,
+  PortfolioAdviceRequest,
+  PortfolioAdviceResponse,
+  SuggestRequest,
+  SuggestResponse,
   UniversityItem,
   UniqueCourse,
   UniqueCourseDetail,
@@ -34,10 +38,17 @@ export const postOfferAssess = (body: OfferAssessRequest) =>
     body: JSON.stringify(body),
   });
 
-// ── Course suggestion (strategy page) ────────────────────────────
-// ASSUMPTION: endpoint /api/py/suggest accepts SuggestRequest
-export const postSuggest = (body: import("./types").SuggestRequest) =>
-  apiFetch<import("./types").SuggestResponse>("/suggest", {
+// ── Course suggestions (strategy > alternatives tab) ─────────────
+export const postSuggest = (body: SuggestRequest) =>
+  apiFetch<SuggestResponse>("/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Portfolio advice (strategy > mix tab + tracker) ──────────────
+export const postPortfolioAdvice = (body: PortfolioAdviceRequest) =>
+  apiFetch<PortfolioAdviceResponse>("/portfolio_advice", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
