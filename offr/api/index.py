@@ -2116,3 +2116,116 @@ Rules:
         "key_actions":      result.get("key_actions")      or fallback["key_actions"],
         "provider_meta":    {"latency_ms": latency_ms},
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# Label suggestions — /api/py/label_suggestions
+# AI suggests a UCAS label (Firm / Insurance / Wildcard / Backup)
+# for each assessed choice in the context of the full portfolio.
+# ─────────────────────────────────────────────────────────────
+
+class LabelEntry(BaseModel):
+    course_name: str
+    university_name: str
+    band: str
+    chance_percent: int
+
+
+class LabelSuggestionsRequest(BaseModel):
+    entries: List[LabelEntry]
+
+
+VALID_LABELS = {"Firm", "Insurance", "Backup", "Wildcard", "Undecided"}
+
+
+def _label_fallback(entries: List[LabelEntry]) -> Dict[str, Any]:
+    """Rule-based label assignment based on band and relative position."""
+    if not entries:
+        return {"status": "ok", "suggestions": {}}
+
+    sorted_by_chance = sorted(entries, key=lambda e: e.chance_percent, reverse=True)
+    suggestions: Dict[str, Dict[str, str]] = {}
+
+    for i, entry in enumerate(sorted_by_chance):
+        if entry.band == "Safe":
+            label = "Insurance"
+            reason = "Safe choices work best as insurance — comfortably above threshold."
+        elif entry.band == "Reach":
+            label = "Wildcard"
+            reason = "Reach choices are aspirational — label as wildcard and keep safer fallbacks."
+        else:
+            if i == 0 and entry.chance_percent >= 55:
+                label = "Firm"
+                reason = "Your strongest Target — a natural firm choice candidate."
+            else:
+                label = "Backup"
+                reason = "A Target with lower odds — good as backup alongside stronger Targets."
+        suggestions[entry.course_name] = {"label": label, "reason": reason}
+
+    return {"status": "ok", "suggestions": suggestions}
+
+
+@app.post("/api/py/label_suggestions")
+async def label_suggestions(payload: LabelSuggestionsRequest):
+    """
+    Returns AI-suggested UCAS labels for each choice in the portfolio.
+    Considers the full portfolio context — not each entry in isolation.
+    Falls back to rule-based labels when Gemini is unavailable.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not payload.entries:
+        return {"status": "ok", "suggestions": {}}
+
+    if not is_gemini_available():
+        return _label_fallback(payload.entries)
+
+    portfolio_str = "\n".join(
+        f"- {e.course_name} at {e.university_name}: {e.band} ({e.chance_percent}%)"
+        for e in payload.entries
+    )
+
+    prompt = f"""You are a UCAS advisor helping a student label their university choices.
+
+UCAS labels: Firm (top choice), Insurance (safe fallback), Backup (additional option),
+Wildcard (aspirational Reach), Undecided (not sure yet).
+
+Student's portfolio:
+{portfolio_str}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "suggestions": {{
+    "<exact course_name>": {{
+      "label": "<Firm|Insurance|Backup|Wildcard|Undecided>",
+      "reason": "<1 sentence why in context of full portfolio — ≤ 20 words>"
+    }}
+  }}
+}}
+
+Rules:
+- Keys must exactly match the course names listed above
+- Don't suggest two Firms; ensure at least one Insurance if >1 entry
+- Be specific about portfolio context, not generic
+- Reach → Wildcard is usually correct; Safe → Insurance usually correct"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid, temperature=0.3)
+
+    if err or result is None:
+        return _label_fallback(payload.entries)
+
+    raw = result.get("suggestions") or {}
+    fallback_sugg = _label_fallback(payload.entries)["suggestions"]
+    cleaned: Dict[str, Dict[str, str]] = {}
+    for entry in payload.entries:
+        name = entry.course_name
+        ai_s = raw.get(name) or {}
+        lbl = ai_s.get("label") if ai_s.get("label") in VALID_LABELS else (fallback_sugg.get(name) or {}).get("label", "Undecided")
+        rsn = ai_s.get("reason") or (fallback_sugg.get(name) or {}).get("reason", "")
+        cleaned[name] = {"label": lbl, "reason": rsn}
+
+    return {
+        "status": "ok",
+        "suggestions": cleaned,
+        "provider_meta": {"latency_ms": latency_ms},
+    }

@@ -306,6 +306,22 @@ export interface DashboardInsightsResponse {
   retryable?: boolean;
 }
 
+// ── Tracker label suggestions ────────────────────────────────────────
+export interface LabelSuggestionsRequest {
+  entries: { course_name: string; university_name: string; band: string; chance_percent: number }[];
+}
+
+export interface LabelSuggestion {
+  label: string;
+  reason: string;
+}
+
+export interface LabelSuggestionsResponse {
+  status: "ok" | "error";
+  suggestions: Record<string, LabelSuggestion>;  // keyed by course_name
+  provider_meta?: { latency_ms: number };
+}
+
 // ── Explore: Hidden gems & shortlist ────────────────────────────────
 
 export interface HiddenGemRecommendation {

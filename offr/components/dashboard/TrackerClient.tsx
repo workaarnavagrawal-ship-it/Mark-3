@@ -1,8 +1,15 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { updateTrackerLabel, deleteTrackerEntry } from "@/lib/profile";
-import type { TrackerEntry } from "@/lib/types";
+import { postPortfolioAdvice, postLabelSuggestions } from "@/lib/api";
+import { AIBlock } from "@/components/ai/AIBlock";
+import type {
+  AIStatus,
+  LabelSuggestion,
+  PortfolioAdviceResponse,
+  TrackerEntry,
+} from "@/lib/types";
 
 const LABELS = ["Firm", "Insurance", "Backup", "Wildcard", "Undecided"];
 const BS: Record<string, any> = {
@@ -11,10 +18,76 @@ const BS: Record<string, any> = {
   Reach:  { bg: "var(--rch-bg)",  color: "var(--rch-t)",  border: "1px solid var(--rch-b)", bar: "var(--rch-t)" },
 };
 
-export function TrackerClient({ initialAssessments }: { initialAssessments: TrackerEntry[] }) {
+export function TrackerClient({ initialAssessments, curriculum = "IB", interests = [] }: {
+  initialAssessments: TrackerEntry[];
+  curriculum?: string;
+  interests?: string[];
+}) {
   const [entries, setEntries] = useState(initialAssessments);
   const [labelOpen, setLabelOpen] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+
+  // ── Portfolio advice (AI) ─────────────────────────────────────
+  const [portfolioAdvice, setPortfolioAdvice]   = useState<PortfolioAdviceResponse | null>(null);
+  const [portfolioStatus, setPortfolioStatus]   = useState<AIStatus>("idle");
+  const [portfolioErr,    setPortfolioErr]      = useState<string | null>(null);
+
+  // ── Label suggestions (AI) ────────────────────────────────────
+  const [labelSuggestions, setLabelSuggestions] = useState<Record<string, LabelSuggestion>>({});
+  const [labelAIStatus,    setLabelAIStatus]    = useState<AIStatus>("idle");
+
+  const fetchAI = useCallback(async (currentEntries: TrackerEntry[]) => {
+    if (!currentEntries.length) return;
+
+    const bands: Record<string, number> = { Safe: 0, Target: 0, Reach: 0 };
+    currentEntries.forEach(e => { if (e.band in bands) bands[e.band]++; });
+
+    // Portfolio advice + label suggestions in parallel
+    setPortfolioStatus("loading");
+    setLabelAIStatus("loading");
+
+    const [adviceRes, labelRes] = await Promise.allSettled([
+      postPortfolioAdvice({
+        curriculum,
+        interests,
+        bands,
+        assessments: currentEntries.map(e => ({
+          course_name: e.course_name,
+          university_name: e.university_name,
+          band: e.band,
+          chance_percent: e.chance_percent,
+        })),
+      }),
+      postLabelSuggestions({
+        entries: currentEntries.map(e => ({
+          course_name: e.course_name,
+          university_name: e.university_name,
+          band: e.band,
+          chance_percent: e.chance_percent,
+        })),
+      }),
+    ]);
+
+    if (adviceRes.status === "fulfilled") {
+      setPortfolioAdvice(adviceRes.value);
+      setPortfolioStatus("ok");
+    } else {
+      setPortfolioErr((adviceRes.reason as Error)?.message ?? "Could not load portfolio advice.");
+      setPortfolioStatus("error");
+    }
+
+    if (labelRes.status === "fulfilled") {
+      setLabelSuggestions(labelRes.value.suggestions ?? {});
+      setLabelAIStatus("ok");
+    } else {
+      setLabelAIStatus("error");
+    }
+  }, [curriculum, interests]);
+
+  useEffect(() => {
+    if (initialAssessments.length > 0) fetchAI(initialAssessments);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleLabel(id: string, label: string) {
     await updateTrackerLabel(id, label);
@@ -26,7 +99,9 @@ export function TrackerClient({ initialAssessments }: { initialAssessments: Trac
 
   async function handleDelete(id: string) {
     await deleteTrackerEntry(id);
-    setEntries(p => p.filter(e => e.id !== id));
+    const next = entries.filter(e => e.id !== id);
+    setEntries(next);
+    if (next.length > 0) fetchAI(next);
   }
 
   const counts = { Safe: 0, Target: 0, Reach: 0 };
@@ -54,6 +129,42 @@ export function TrackerClient({ initialAssessments }: { initialAssessments: Trac
         </div>
       )}
 
+      {/* AI portfolio advice block */}
+      {entries.length > 0 && (
+        <div className="card" style={{ marginBottom: "16px" }}>
+          <p className="label" style={{ marginBottom: "10px" }}>AI portfolio assessment</p>
+          <AIBlock
+            status={portfolioStatus}
+            error={portfolioErr ?? undefined}
+            onRetry={() => fetchAI(entries)}
+            skeletonLines={2}
+          >
+            {portfolioAdvice && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                  <p style={{ fontSize: "13px", color: "var(--t2)", lineHeight: 1.65, flex: 1 }}>
+                    {portfolioAdvice.strategy_summary}
+                  </p>
+                  <span style={{
+                    fontSize: "11px", color: "var(--t3)", textTransform: "uppercase",
+                    letterSpacing: "0.05em", flexShrink: 0, marginTop: "2px",
+                    padding: "3px 8px", border: "1px solid var(--b)", borderRadius: "6px",
+                  }}>
+                    {portfolioAdvice.risk_balance}
+                  </span>
+                </div>
+                {portfolioAdvice.actions.map((action, i) => (
+                  <div key={i} style={{ display: "flex", gap: "10px" }}>
+                    <span style={{ color: "var(--acc)", flexShrink: 0 }}>→</span>
+                    <p style={{ fontSize: "12px", color: "var(--t3)", lineHeight: 1.6 }}>{action}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </AIBlock>
+        </div>
+      )}
+
       {entries.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: "56px 32px", borderStyle: "dashed" }}>
           <h3 className="serif" style={{ fontSize: "22px", fontWeight: 400, color: "var(--t)", marginBottom: "10px" }}>No choices saved yet</h3>
@@ -73,7 +184,13 @@ export function TrackerClient({ initialAssessments }: { initialAssessments: Trac
                       <h3 className="serif" style={{ fontSize: "18px", fontWeight: 400, color: "var(--t)" }}>{entry.course_name}</h3>
                       <span className="pill" style={{ background: bs.bg, color: bs.color, border: bs.border }}>{entry.band}</span>
                     </div>
-                    <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "14px" }}>{entry.university_name}</p>
+                    <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: labelSuggestions[entry.course_name] ? "6px" : "14px" }}>{entry.university_name}</p>
+                    {labelAIStatus !== "idle" && labelSuggestions[entry.course_name] && (
+                      <p style={{ fontSize: "11px", color: "var(--t3)", fontStyle: "italic", marginBottom: "10px", lineHeight: 1.5 }}>
+                        AI suggests: <strong style={{ color: "var(--t2)", fontStyle: "normal" }}>{labelSuggestions[entry.course_name].label}</strong>
+                        {" · "}{labelSuggestions[entry.course_name].reason}
+                      </p>
+                    )}
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                       <div style={{ flex: 1, height: "3px", borderRadius: "2px", background: "var(--s3)", overflow: "hidden" }}>
                         <div style={{ height: "100%", borderRadius: "2px", background: bs.bar, width: `${entry.chance_percent}%`, opacity: 0.8 }} />

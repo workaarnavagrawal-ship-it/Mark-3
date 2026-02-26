@@ -6,8 +6,14 @@ export default async function TrackerPage() {
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth");
-  const { data: profile } = await supabase.from("profiles").select("id").eq("user_id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("id, curriculum, interests").eq("user_id", user.id).single();
   if (!profile) redirect("/onboarding");
   const { data: assessments } = await supabase.from("assessments").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-  return <TrackerClient initialAssessments={assessments || []} />;
+  return (
+    <TrackerClient
+      initialAssessments={assessments || []}
+      curriculum={profile.curriculum ?? "IB"}
+      interests={profile.interests ?? []}
+    />
+  );
 }
