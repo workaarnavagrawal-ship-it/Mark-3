@@ -120,12 +120,12 @@ export default async function DashboardPage() {
       </div>
 
       {/* Recent assessments */}
-      {assessments && assessments.length > 0 && (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
-            <h3 className="serif" style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}>Recent assessments</h3>
-            <Link href="/dashboard/tracker" style={{ fontSize: "13px", color: "var(--t3)", textDecoration: "none" }}>View tracker →</Link>
-          </div>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+          <h3 className="serif" style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}>Recent assessments</h3>
+          <Link href="/dashboard/tracker" style={{ fontSize: "13px", color: "var(--t3)", textDecoration: "none" }}>View tracker →</Link>
+        </div>
+        {assessments && assessments.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {assessments.map((a: any) => {
               const bs = BS[a.band] || BS.Reach;
@@ -143,8 +143,15 @@ export default async function DashboardPage() {
               );
             })}
           </div>
-        </div>
-      )}
+        ) : (
+          <div style={{ padding: "20px 24px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "12px" }}>
+            <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "8px" }}>No assessments yet.</p>
+            <Link href="/dashboard/assess" style={{ fontSize: "13px", color: "var(--t)", textDecoration: "none", borderBottom: "1px solid var(--b)" }}>
+              Check offer chances →
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
