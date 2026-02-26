@@ -25,10 +25,16 @@ export default function AuthPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
       });
-      const data = await res.json();
+
+      // Read as text first — if the server returns an HTML error page
+      // (e.g. Next.js 500 from a crashed middleware), res.json() would
+      // throw "Unexpected token '<'" and we'd lose the real status code.
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* non-JSON response */ }
 
       if (!res.ok) {
-        const msg = data?.error || "Something went wrong sending the link.";
+        const msg = data?.error || `Server error (${res.status}). Please try again.`;
         if (msg.toLowerCase().includes("rate limit")) {
           setErr(
             "You just requested a link. Please wait 60 seconds before requesting another."

@@ -30,7 +30,18 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // Wrap getUser in try/catch — if Supabase is unreachable or returns an
+  // unexpected error, we must NOT crash the middleware. A crashed middleware
+  // causes Next.js to return an HTML 500 for every request, which then
+  // breaks API routes that expect JSON (they get "Unexpected token '<'").
+  let user: any = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // Network or SDK error — treat as unauthenticated and let the request
+    // proceed. Public routes will work; protected routes will redirect.
+  }
 
   const pathname = request.nextUrl.pathname;
   const isPublic = ["/", "/auth"].some(p => pathname === p) ||
