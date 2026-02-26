@@ -306,6 +306,30 @@ export interface DashboardInsightsResponse {
   retryable?: boolean;
 }
 
+// ── Profile AI suggestions ────────────────────────────────────────────
+export interface ProfileSuggestionsRequest {
+  curriculum: string;
+  year: string;
+  interests_count: number;
+  has_grades: boolean;
+  has_ps: boolean;
+  ps_length: number;
+  ib_total?: number | null;
+  a_level_count?: number | null;
+}
+
+export interface ProfileSuggestion {
+  field: string;
+  why: string;
+  action: string;
+}
+
+export interface ProfileSuggestionsResponse {
+  status: "ok" | "error";
+  suggestions: ProfileSuggestion[];
+  provider_meta?: { latency_ms: number };
+}
+
 // ── Tracker label suggestions ────────────────────────────────────────
 export interface LabelSuggestionsRequest {
   entries: { course_name: string; university_name: string; band: string; chance_percent: number }[];

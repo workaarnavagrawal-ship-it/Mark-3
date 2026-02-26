@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { upsertProfile, upsertSubjects } from "@/lib/profile";
+import { ProfileSuggestionsPanel } from "./ProfileSuggestionsPanel";
 import type { Profile, SubjectEntry } from "@/lib/types";
 
 const INTERESTS = ["Economics","Law","Computer Science","Medicine","Engineering","Mathematics","History","Philosophy","Politics","Psychology","Business","Architecture","Biology","Chemistry","Physics","Literature","Art & Design","Music","Geography","Sociology","Education","Environmental Science"];
@@ -163,11 +164,27 @@ export function ProfileClient({ profile, subjects }: { profile: Profile; subject
         )}
       </Section>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px", marginBottom: "24px" }}>
         <button onClick={save} disabled={saving} className="btn btn-prim" style={{ padding: "13px 32px" }}>
           {saving ? "Saving…" : saved ? "✓ Saved!" : "Save changes"}
         </button>
       </div>
+
+      {/* AI completeness + suggestions — non-blocking, additive */}
+      <ProfileSuggestionsPanel request={{
+        curriculum: profile.curriculum,
+        year: String(profile.year),
+        interests_count: interests.length,
+        has_grades: profile.curriculum === "IB"
+          ? hl.length > 0 || sl.length > 0
+          : al.length > 0,
+        has_ps: !!(q1.trim() || statement.trim()),
+        ps_length: (psFormat === "UCAS_3Q" ? q1 + q2 + q3 : statement).length,
+        ib_total: profile.curriculum === "IB"
+          ? [...hl,...sl].reduce((s,x) => s + Number(x.predicted_grade), 0) + corePoints
+          : null,
+        a_level_count: profile.curriculum !== "IB" ? al.length : null,
+      }} />
     </div>
   );
 }

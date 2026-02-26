@@ -62,6 +62,14 @@ export const postDashboardInsights = (body: DashboardInsightsRequest) =>
     body: JSON.stringify(body),
   });
 
+// ── Profile AI suggestions ────────────────────────────────────────
+export const postProfileSuggestions = (body: import("./types").ProfileSuggestionsRequest) =>
+  apiFetch<import("./types").ProfileSuggestionsResponse>("/profile_suggestions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 // ── Tracker label suggestions ────────────────────────────────────
 export const postLabelSuggestions = (body: import("./types").LabelSuggestionsRequest) =>
   apiFetch<import("./types").LabelSuggestionsResponse>("/label_suggestions", {
