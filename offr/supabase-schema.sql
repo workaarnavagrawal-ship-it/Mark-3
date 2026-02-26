@@ -67,3 +67,9 @@ create policy "Users own their subjects" on subjects for all using (
 );
 create policy "Users own their assessments" on assessments for all using (auth.uid() = user_id);
 create policy "Users own their shortlisted courses" on shortlisted_courses for all using (auth.uid() = user_id);
+
+-- ── Migrations ────────────────────────────────────────────────────
+-- Run these if upgrading from an earlier schema version
+
+-- v2: persist latest PS analysis result on the profile row
+alter table profiles add column if not exists ps_last_analysis jsonb;

@@ -14,11 +14,14 @@ const BS: Record<string, any> = {
 export function TrackerClient({ initialAssessments }: { initialAssessments: TrackerEntry[] }) {
   const [entries, setEntries] = useState(initialAssessments);
   const [labelOpen, setLabelOpen] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   async function handleLabel(id: string, label: string) {
     await updateTrackerLabel(id, label);
     setEntries(p => p.map(e => e.id === id ? { ...e, label } : e));
     setLabelOpen(null);
+    setSavedId(id);
+    setTimeout(() => setSavedId(null), 2000);
   }
 
   async function handleDelete(id: string) {
@@ -92,10 +95,10 @@ export function TrackerClient({ initialAssessments }: { initialAssessments: Trac
                       </div>
                     ) : (
                       <>
-                        <button onClick={() => setLabelOpen(entry.id!)} style={{ background: "transparent", border: "1px solid var(--b)", borderRadius: "9999px", color: "var(--t3)", fontSize: "11px", padding: "4px 12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))", transition: "all 150ms" }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; (e.currentTarget as HTMLElement).style.color = "var(--t2)"; }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; }}>
-                          {entry.label || "Label ▾"}
+                        <button onClick={() => setLabelOpen(entry.id!)} style={{ background: "transparent", border: `1px solid ${savedId === entry.id ? "var(--safe-b)" : "var(--b)"}`, borderRadius: "9999px", color: savedId === entry.id ? "var(--safe-t)" : "var(--t3)", fontSize: "11px", padding: "4px 12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))", transition: "all 150ms" }}
+                          onMouseEnter={e => { if (savedId !== entry.id) { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; (e.currentTarget as HTMLElement).style.color = "var(--t2)"; } }}
+                          onMouseLeave={e => { if (savedId !== entry.id) { (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; } }}>
+                          {savedId === entry.id ? `✓ ${entry.label}` : (entry.label || "Label ▾")}
                         </button>
                         <button onClick={() => handleDelete(entry.id!)} style={{ background: "transparent", border: "none", color: "var(--t3)", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))", transition: "color 150ms" }}
                           onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "var(--rch-t)"}

@@ -18,3 +18,8 @@ dist/
 
 # Debug
 npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

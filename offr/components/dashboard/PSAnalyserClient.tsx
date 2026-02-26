@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import type { Profile, PSLineFeedback, PSAnalysisResponse } from "@/lib/types";
+import { savePSAnalysis } from "@/lib/profile";
 
 function splitLines(text: string): string[] {
   const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
@@ -43,7 +44,9 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
 
   const [ps, setPs] = useState(defaultPS);
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<PSAnalysisResponse | null>(null);
+  const [analysis, setAnalysis] = useState<PSAnalysisResponse | null>(
+    profile.ps_last_analysis ?? null
+  );
   const [err, setErr] = useState("");
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [wordCount, setWordCount] = useState(0);
@@ -57,7 +60,9 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
     try {
       const res = await fetch("/api/py/analyse_ps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ statement: ps, lines, format: profile.ps_format || "UCAS_3Q" }) });
       if (!res.ok) throw new Error(`Analysis failed (${res.status})`);
-      setAnalysis(await res.json());
+      const result: PSAnalysisResponse = await res.json();
+      setAnalysis(result);
+      savePSAnalysis(result).catch(() => {}); // persist silently, don't block UI
     } catch (e: any) { setErr(e.message || "Analysis failed"); }
     finally { setLoading(false); }
   }

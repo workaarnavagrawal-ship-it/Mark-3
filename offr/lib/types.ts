@@ -1,3 +1,16 @@
+// ── Shared AI types ──────────────────────────────────────────────
+// Mirror of api/ai_service.py AIError.to_dict() and AIBlock component types.
+
+export type AIStatus = "idle" | "loading" | "ok" | "error";
+
+export interface AIErrorPayload {
+  status: "error";
+  error_code: string;
+  message: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+}
+
 // ── Profile ─────────────────────────────────────────────────────
 export type Curriculum = "IB" | "A_LEVELS";
 export type YearGroup = "11" | "12";
@@ -25,6 +38,7 @@ export interface Profile {
   ps_q3?: string;
   ps_format?: "UCAS_3Q" | "LEGACY";
   ps_statement?: string;
+  ps_last_analysis?: PSAnalysisResponse;
   created_at?: string;
   updated_at?: string;
 }

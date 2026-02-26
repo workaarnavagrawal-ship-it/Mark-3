@@ -1,5 +1,5 @@
 import { createClient } from "./supabase/client";
-import type { Profile, ProfileWithSubjects, SubjectEntry, TrackerEntry } from "./types";
+import type { Profile, ProfileWithSubjects, PSAnalysisResponse, SubjectEntry, TrackerEntry } from "./types";
 
 // ── Profile ──────────────────────────────────────────────────────
 export async function getProfile(): Promise<ProfileWithSubjects | null> {
@@ -83,4 +83,15 @@ export async function updateTrackerLabel(id: string, label: string): Promise<voi
 export async function deleteTrackerEntry(id: string): Promise<void> {
   const supabase = createClient();
   await supabase.from("assessments").delete().eq("id", id);
+}
+
+// ── PS analysis persistence ────────────────────────────────────────
+export async function savePSAnalysis(result: PSAnalysisResponse): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  await supabase
+    .from("profiles")
+    .update({ ps_last_analysis: result, updated_at: new Date().toISOString() })
+    .eq("user_id", user.id);
 }

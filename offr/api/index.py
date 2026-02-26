@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -13,6 +14,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+
+from api.ai_service import AIError, call_gemini_json, is_gemini_available
 
 app = FastAPI(
     title="offr API",
@@ -113,33 +116,7 @@ def apply_ps_score(
     return new_score, note
 
 
-# ─────────────────────────────────────────────────────────────
-# Gemini
-# ─────────────────────────────────────────────────────────────
-
-def _try_import_genai():
-    try:
-        from google import genai  # type: ignore
-        return genai
-    except Exception:
-        return None
-
-
-def gemini_model_name() -> str:
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-
-def gemini_client():
-    genai = _try_import_genai()
-    if genai is None:
-        return None
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return None
-    try:
-        return genai.Client(api_key=api_key)
-    except Exception:
-        return None
+# Gemini helpers moved to api/ai_service.py — use call_gemini_json() and is_gemini_available()
 
 
 def safe_detail(msg: str, e: Exception) -> str:
@@ -563,8 +540,7 @@ def counsellor_rewrite_with_gemini(
     detail_level: str,
     payload_summary: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    client = gemini_client()
-    if client is None:
+    if not is_gemini_available():
         return None
 
     style = "BRIEF" if detail_level == "brief" else "DETAILED"
@@ -583,29 +559,24 @@ def counsellor_rewrite_with_gemini(
         f"Context: {json.dumps(payload_summary)}"
     )
 
-    try:
-        resp = client.models.generate_content(
-            model=gemini_model_name(),
-            contents=prompt,
-            config={
-                "temperature": 0.3,
-                "response_mime_type": "application/json",
-                "response_json_schema": {
-                    "type": "object",
-                    "properties": {
-                        "strengths":       {"type": "array", "items": {"type": "string"}},
-                        "risks":           {"type": "array", "items": {"type": "string"}},
-                        "what_to_do_next": {"type": "array", "items": {"type": "string"}},
-                        "notes":           {"type": "array", "items": {"type": "string"}},
-                    },
-                    "required": ["strengths", "risks", "what_to_do_next", "notes"],
+    tid = uuid.uuid4().hex[:8]
+    result, _err, _ms = call_gemini_json(
+        prompt,
+        trace_id=tid,
+        config_extra={
+            "response_json_schema": {
+                "type": "object",
+                "properties": {
+                    "strengths":       {"type": "array", "items": {"type": "string"}},
+                    "risks":           {"type": "array", "items": {"type": "string"}},
+                    "what_to_do_next": {"type": "array", "items": {"type": "string"}},
+                    "notes":           {"type": "array", "items": {"type": "string"}},
                 },
+                "required": ["strengths", "risks", "what_to_do_next", "notes"],
             },
-        )
-        # FIX: `import json` was buried inside this function — now at top of file
-        return json.loads(resp.text)
-    except Exception:
-        return None
+        },
+    )
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -780,8 +751,7 @@ def _sanitise_rubric(raw: Dict[str, Any]) -> Dict[str, Any]:
 def run_ps_analyzer(
     course_row: Dict[str, Any], ps: PsInput
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    client = gemini_client()
-    if client is None:
+    if not is_gemini_available():
         return None, "PS analysis unavailable (Gemini not configured)."
 
     q1 = ps.q1 or ""; q2 = ps.q2 or ""; q3 = ps.q3 or ""; statement = ps.statement or ""
@@ -790,59 +760,51 @@ def run_ps_analyzer(
     heur        = ps_heuristics(full_text)
     prompt      = build_ps_prompt(course_row, ps, constraints, heur)
 
-    try:
-        resp = client.models.generate_content(
-            model=gemini_model_name(),
-            contents=prompt,
-            config={"temperature": 0.3, "response_mime_type": "application/json"},
-        )
-        text = re.sub(r"^```(?:json)?\s*", "", resp.text.strip())
-        text = re.sub(r"\s*```$", "", text)
-        raw: Dict[str, Any] = json.loads(text)
+    tid = uuid.uuid4().hex[:8]
+    raw, err, _ms = call_gemini_json(prompt, trace_id=tid)
+    if err:
+        return None, err.message
+    if raw is None:
+        return None, "PS analysis returned empty response."
 
-        raw = _sanitise_rubric(raw)
+    raw = _sanitise_rubric(raw)
 
-        for field in ("strengths", "risks", "red_flags", "what_to_do_next"):
-            if not isinstance(raw.get(field), list): raw[field] = []
+    for field in ("strengths", "risks", "red_flags", "what_to_do_next"):
+        if not isinstance(raw.get(field), list): raw[field] = []
 
-        clean_edits: List[Dict[str, Any]] = []
-        for edit in (raw.get("suggested_edits") or []):
-            if not isinstance(edit, dict): continue
-            t = str(edit.get("target", "GLOBAL")).upper()
-            if t not in ("Q1", "Q2", "Q3", "GLOBAL"): t = "GLOBAL"
-            p = str(edit.get("priority", "med")).lower()
-            if p not in ("high", "med", "low"): p = "med"
-            clean_edits.append({
-                "target": t, "priority": p,
-                "change": str(edit.get("change", "")),
-                "example_rewrite_optional": edit.get("example_rewrite_optional"),
-            })
-        raw["suggested_edits"] = clean_edits
+    clean_edits: List[Dict[str, Any]] = []
+    for edit in (raw.get("suggested_edits") or []):
+        if not isinstance(edit, dict): continue
+        t = str(edit.get("target", "GLOBAL")).upper()
+        if t not in ("Q1", "Q2", "Q3", "GLOBAL"): t = "GLOBAL"
+        p = str(edit.get("priority", "med")).lower()
+        if p not in ("high", "med", "low"): p = "med"
+        clean_edits.append({
+            "target": t, "priority": p,
+            "change": str(edit.get("change", "")),
+            "example_rewrite_optional": edit.get("example_rewrite_optional"),
+        })
+    raw["suggested_edits"] = clean_edits
 
-        if not isinstance(raw.get("alignment"), dict): raw["alignment"] = {}
-        for k in ("signals_covered", "signals_missing", "coverage_notes"):
-            raw["alignment"].setdefault(k, [])
-        raw["alignment"]["ps_expected_signals"] = split_signals(clean_str(course_row.get("ps_expected_signals")))
+    if not isinstance(raw.get("alignment"), dict): raw["alignment"] = {}
+    for k in ("signals_covered", "signals_missing", "coverage_notes"):
+        raw["alignment"].setdefault(k, [])
+    raw["alignment"]["ps_expected_signals"] = split_signals(clean_str(course_row.get("ps_expected_signals")))
 
-        rubric_obj = {k: RubricCell(**v) for k, v in raw["rubric"].items()}
-        wt = weighted_score_from_rubric(rubric_obj)
-        raw["scores"] = {"weighted_total": wt, "band": ps_band(wt)}
+    rubric_obj = {k: RubricCell(**v) for k, v in raw["rubric"].items()}
+    wt = weighted_score_from_rubric(rubric_obj)
+    raw["scores"] = {"weighted_total": wt, "band": ps_band(wt)}
 
-        raw["meta"] = {
-            "course_id":    course_row.get("course_id"),
-            "course_name":  course_row.get("course_name"),
-            "faculty":      course_row.get("faculty"),
-            "format":       ps.format,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "model":        gemini_model_name(),
-        }
-        raw["constraints"] = constraints
-        return raw, None
-
-    except json.JSONDecodeError as e:
-        return None, safe_detail("PS JSON parse failed", e)
-    except Exception as e:
-        return None, safe_detail("PS analysis failed", e)
+    raw["meta"] = {
+        "course_id":    course_row.get("course_id"),
+        "course_name":  course_row.get("course_name"),
+        "faculty":      course_row.get("faculty"),
+        "format":       ps.format,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model":        os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+    }
+    raw["constraints"] = constraints
+    return raw, None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -861,11 +823,10 @@ def run_standalone_ps_analysis(
     Tries Gemini first; if unavailable or fails, falls back to a rule-based heuristic
     implementation so the feature still works instead of returning 500s.
     """
-    client = gemini_client()
     heur = ps_heuristics(statement)
 
     # ── Fallback: no Gemini configured ────────────────────────────────
-    if client is None:
+    if not is_gemini_available():
         return _fallback_ps_analysis(statement, lines, heur), None
 
     prompt = f"""You are a world-class UK university admissions consultant.
@@ -907,25 +868,12 @@ Be specific and honest. Reward: intellectual curiosity backed by evidence, speci
 subject depth, authentic voice. Penalise: generic openers, vague claims, clichés,
 activities listed without reflection."""
 
-    try:
-        resp = client.models.generate_content(
-            model=gemini_model_name(),
-            contents=prompt,
-            config={"temperature": 0.3, "response_mime_type": "application/json"},
-        )
-        text = re.sub(r"^```(?:json)?\s*", "", resp.text.strip())
-        text = re.sub(r"\s*```$", "", text)
-        return json.loads(text), None
-    except json.JSONDecodeError as e:
-        # If model responded but JSON is broken, degrade gracefully to heuristic output
-        return _fallback_ps_analysis(statement, lines, heur), safe_detail(
-            "PS JSON parse failed", e
-        )
-    except Exception as e:
-        # Any other model error: fall back to heuristic implementation
-        return _fallback_ps_analysis(statement, lines, heur), safe_detail(
-            "PS analysis failed", e
-        )
+    tid = uuid.uuid4().hex[:8]
+    result, err, _ms = call_gemini_json(prompt, trace_id=tid)
+    if err:
+        # Degrade gracefully to heuristic output on any error
+        return _fallback_ps_analysis(statement, lines, heur), err.message
+    return result, None
 
 
 def _fallback_ps_analysis(
@@ -1190,7 +1138,7 @@ def health():
             "status":       "ok",
             "courses":      len(df),
             "universities": int(df["university_id"].nunique()) if "university_id" in df.columns else 0,
-            "gemini":       gemini_client() is not None,
+            "gemini":       is_gemini_available(),
             "data_file":    pick_data_path().name,
         }
     except Exception as e:
@@ -1602,6 +1550,11 @@ async def analyse_ps(request: Request):
         return JSONResponse({"error": "lines must be a non-empty array"}, status_code=400)
 
     result, err = run_standalone_ps_analysis(statement, lines, ps_format)
-    if err:
-        return JSONResponse({"error": err}, status_code=500)
+    # `run_standalone_ps_analysis` returns a valid fallback result even when
+    # Gemini fails — only return 500 when there is genuinely no result at all.
+    if result is None:
+        return JSONResponse(
+            {"error": err or "Analysis failed"},
+            status_code=500,
+        )
     return JSONResponse(result)
