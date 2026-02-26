@@ -171,7 +171,7 @@ def apply_ps_score(
     if not ps_band_val:
         return base_score, None
     tier  = get_ps_tier(university_id)
-    delta = PS_SCORE_IMPACT.get((tier, ps_band_val), 0)
+    delta = PS_SCORE_IMPACT.get((tier, ps_band_val.upper()), 0)
     new_score = max(0, min(100, base_score + delta))
     note: Optional[str] = None
     if delta <= -12:
