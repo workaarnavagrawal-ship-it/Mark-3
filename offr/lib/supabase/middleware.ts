@@ -46,6 +46,7 @@ export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isPublic = ["/", "/auth"].some(p => pathname === p) ||
     pathname.startsWith("/auth/") ||
+    pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/py");
 
