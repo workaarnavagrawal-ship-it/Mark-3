@@ -62,6 +62,14 @@ export const postDashboardInsights = (body: DashboardInsightsRequest) =>
     body: JSON.stringify(body),
   });
 
+// ── Result counterfactual ─────────────────────────────────────────
+export const postResultCounterfactual = (body: import("./types").ResultCounterfactualRequest) =>
+  apiFetch<import("./types").ResultCounterfactualResponse>("/result_counterfactual", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 // ── PS analysis ──────────────────────────────────────────────────
 // ASSUMPTION: endpoint /api/py/analyse_ps accepts { statement, lines, format }
 export const postAnalysePS = (body: {

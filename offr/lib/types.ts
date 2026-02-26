@@ -228,6 +228,29 @@ export interface PortfolioAdviceResponse {
   provider_meta?: { latency_ms: number };
 }
 
+// ── Result page counterfactual ─────────────────────────────────────
+export interface ResultCounterfactualRequest {
+  band: string;
+  chance_percent: number;
+  course_name?: string | null;
+  checks_passed?: string[];
+  checks_failed?: string[];
+  counsellor_strengths?: string[];
+  counsellor_risks?: string[];
+  has_ps?: boolean;
+  ps_band?: string | null;
+}
+
+export interface ResultCounterfactualResponse {
+  status: "ok" | "error";
+  plain_english: string;
+  if_grades_improve: string;
+  if_ps_improves: string | null;
+  confidence_note: string;
+  key_actions: string[];
+  provider_meta?: { latency_ms: number };
+}
+
 // ── What would improve ───────────────────────────────────────────
 // Extends OfferAssessResponse — already partially present in result_json
 export interface WhatWouldImprove {
