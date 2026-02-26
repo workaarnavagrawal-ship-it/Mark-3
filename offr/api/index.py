@@ -870,9 +870,10 @@ activities listed without reflection."""
 
     tid = uuid.uuid4().hex[:8]
     result, err, _ms = call_gemini_json(prompt, trace_id=tid)
-    if err:
-        # Degrade gracefully to heuristic output on any error
-        return _fallback_ps_analysis(statement, lines, heur), err.message
+    if err or result is None:
+        # Degrade gracefully to heuristic output on any error, or if Gemini
+        # returns JSON null (json.loads("null") → Python None, err is None).
+        return _fallback_ps_analysis(statement, lines, heur), err.message if err else None
     return result, None
 
 
@@ -1644,14 +1645,19 @@ async def analyse_ps(request: Request):
     if not lines or not isinstance(lines, list):
         return JSONResponse({"error": "lines must be a non-empty array"}, status_code=400)
 
-    result, err = run_standalone_ps_analysis(statement, lines, ps_format)
-    # `run_standalone_ps_analysis` returns a valid fallback result even when
-    # Gemini fails — only return 500 when there is genuinely no result at all.
+    try:
+        result, _err = run_standalone_ps_analysis(statement, lines, ps_format)
+    except Exception:
+        # Last-resort fallback: catch any unexpected crash inside the analyser
+        # so the endpoint never propagates a raw 500 to the frontend.
+        try:
+            heur = ps_heuristics(statement)
+            result = _fallback_ps_analysis(statement, lines, heur)
+        except Exception:
+            result = None
+
     if result is None:
-        return JSONResponse(
-            {"error": err or "Analysis failed"},
-            status_code=500,
-        )
+        return JSONResponse({"error": "Analysis failed"}, status_code=500)
     return JSONResponse(result)
 
 
