@@ -2517,7 +2517,7 @@ class PSEvaluateRequest(BaseModel):
     target_course: str = Field(min_length=1)
     target_university: Optional[str] = None
     curriculum: Optional[str] = Field(
-        default=None, pattern="^(IB|ALEVEL)$"
+        default=None, pattern="^(IB|A_LEVELS)$"
     )
     grades_summary: Optional[str] = None
     mode: str = Field(default="standalone", pattern="^(standalone|assessment)$")

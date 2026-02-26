@@ -284,7 +284,7 @@ export interface PSEvaluateRequest {
   personal_statement_text: string;  // required, min 300 chars
   target_course: string;            // required
   target_university?: string | null;
-  curriculum?: "IB" | "ALEVEL" | null;
+  curriculum?: "IB" | "A_LEVELS" | null;
   grades_summary?: string | null;
   mode?: "standalone" | "assessment";
 }

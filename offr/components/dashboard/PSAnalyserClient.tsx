@@ -109,7 +109,7 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
       personal_statement_text: combinedText.trim(),
       target_course: targetCourse.trim(),
       target_university: targetUniversity.trim() || null,
-      curriculum: (profile.curriculum as "IB" | "ALEVEL") || null,
+      curriculum: (profile.curriculum as "IB" | "A_LEVELS") || null,
       grades_summary: null,
       mode: "standalone",
     });
