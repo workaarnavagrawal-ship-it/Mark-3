@@ -2350,3 +2350,74 @@ async def profile_suggestions(payload: ProfileSuggestionsRequest):
         "suggestions": raw,
         "provider_meta": {"latency_ms": latency_ms},
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# FAQ assistant — /api/py/ask_faq
+# Conversational assistant for UCAS / offr questions.
+# ─────────────────────────────────────────────────────────────
+
+OFFR_FAQ_CONTEXT = (
+    "offr is a UK UCAS admissions tool for Year 11-12 students.\n"
+    "Key features:\n"
+    "- Offer Assessment: calculates Safe/Target/Reach chance % using real 2024-25 offer holder data.\n"
+    "- Safe >70%, Target 40-70%, Reach <40%.\n"
+    "- PS Analyser: line-by-line feedback on UCAS personal statement.\n"
+    "- Tracker: UCAS portfolio tracker with AI label suggestions (Firm/Insurance/Backup/Wildcard).\n"
+    "- Explore: browse courses with AI Hidden Gems based on interests.\n"
+    "- Strategy: audits mix, PS tips, AI course alternatives.\n"
+    "- Dashboard: AI 'where you stand' summary.\n"
+    "Universities: Oxford, Cambridge, LSE, Imperial, UCL, Warwick, Edinburgh, Bristol, Durham, Bath, St Andrews, KCL, Manchester, Exeter.\n"
+    "Curricula: IB Diploma (max 45 pts) and A-Levels.\n"
+    "UCAS facts: max 5 choices, PS max 4,000 chars (3-question format from 2025 entry), Firm = first choice, Insurance = safe backup.\n"
+    "UCAS deadlines: 15 October for Oxford/Cambridge/medicine; 15 January for most others."
+)
+
+
+class AskFAQRequest(BaseModel):
+    question: str
+
+
+def _ask_faq_fallback() -> Dict[str, Any]:
+    return {
+        "status": "ok",
+        "answer": "AI assistant is not available right now. Browse the FAQ above or check the UCAS website for detailed guidance.",
+        "follow_up_questions": [],
+        "_fallback": True,
+    }
+
+
+@app.post("/api/py/ask_faq")
+async def ask_faq(payload: AskFAQRequest):
+    """
+    Conversational FAQ assistant. Answers UCAS and offr questions
+    using Gemini with embedded context. Falls back gracefully.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    question = (payload.question or "").strip()[:500]
+    if not question:
+        return JSONResponse({"error": "Question is required."}, status_code=400)
+
+    if not is_gemini_available():
+        return _ask_faq_fallback()
+
+    prompt = (
+        "You are a helpful UCAS admissions assistant for the offr tool.\n\n"
+        f"Context:\n{OFFR_FAQ_CONTEXT}\n\n"
+        f"Student question: {question}\n\n"
+        'Return ONLY valid JSON (no markdown): {"answer": "<2-4 sentences, ≤ 80 words>", "follow_up_questions": ["<q1>", "<q2>"]}\n\n'
+        "Rules: factual, grounded in context, friendly but concise. Say so honestly if you don't know."
+    )
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid, temperature=0.3)
+
+    if err or result is None:
+        return _ask_faq_fallback()
+
+    return {
+        "status": "ok",
+        "answer": result.get("answer") or "I could not generate an answer. Please try rephrasing.",
+        "follow_up_questions": result.get("follow_up_questions") or [],
+        "provider_meta": {"latency_ms": latency_ms},
+    }
