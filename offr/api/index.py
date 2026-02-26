@@ -1998,3 +1998,121 @@ Rules:
         "actions": result.get("actions") or fallback["actions"],
         "provider_meta": {"latency_ms": latency_ms},
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# Result counterfactual — /api/py/result_counterfactual
+# AI explains the verdict in plain English and generates
+# "if X improves" counterfactual reasoning.
+# Used by the result page after an assessment is loaded.
+# ─────────────────────────────────────────────────────────────
+
+class ResultCounterfactualRequest(BaseModel):
+    band: str                    # "Safe" | "Target" | "Reach"
+    chance_percent: int
+    course_name: Optional[str] = None
+    checks_passed: List[str] = []
+    checks_failed: List[str] = []
+    counsellor_strengths: List[str] = []
+    counsellor_risks: List[str] = []
+    has_ps: bool = False
+    ps_band: Optional[str] = None   # "Exceptional" | "Strong" | "Solid" | "Developing" | "Weak"
+
+
+def _counterfactual_fallback(req: ResultCounterfactualRequest) -> Dict[str, Any]:
+    band_msg = {
+        "Safe":   "Your grades comfortably meet the threshold and you rank well in the real applicant pool.",
+        "Target": "Your grades are close to the threshold — this could genuinely go either way.",
+        "Reach":  "There is a meaningful gap between your grades and the typical offer. You would need outstanding supporting material.",
+    }
+    grade_improve_msg = {
+        "Safe":   "Your grade profile already meets or exceeds the threshold. Maintaining your current trajectory is the priority.",
+        "Target": "Improving predicted grades by even 1–2 points could push you into the Safe band and significantly raise your chances.",
+        "Reach":  "If your grades improve substantially (e.g. by 4+ IB points or a grade step in key A-Level subjects), you would re-enter the Target range and become competitive.",
+    }
+    ps_improve_msg = {
+        "Safe":   "A strong PS will reinforce your application — it may not change your band but it distinguishes you from other Safe applicants.",
+        "Target": "At this level, a well-evidenced PS that demonstrates genuine interest in the subject could tip the decision in your favour.",
+        "Reach":  "For Reach applications, a truly exceptional PS that shows intellectual depth and course-specific preparation is one of the few things that can overcome a grade gap.",
+    }
+    confidence = {
+        "Safe":   "High confidence in this assessment — your profile is consistently above threshold.",
+        "Target": "Moderate confidence — small changes in grade projections or PS quality could shift this either way.",
+        "Reach":  "Lower confidence — Reach results depend heavily on factors not captured in grades alone.",
+    }
+    band = req.band if req.band in band_msg else "Reach"
+    return {
+        "status": "ok",
+        "plain_english": band_msg[band],
+        "if_grades_improve": grade_improve_msg[band],
+        "if_ps_improves": ps_improve_msg[band] if req.has_ps or req.ps_band else None,
+        "confidence_note": confidence[band],
+        "key_actions": [r for r in req.counsellor_risks[:2]],
+    }
+
+
+@app.post("/api/py/result_counterfactual")
+async def result_counterfactual(payload: ResultCounterfactualRequest):
+    """
+    AI-generated counterfactual reasoning for a result page.
+
+    Takes assessment outputs as input and returns:
+    - plain_english: verdict explained simply
+    - if_grades_improve: what would change and why
+    - if_ps_improves: PS-specific counterfactual (null if no PS)
+    - confidence_note: calibration language
+    - key_actions: 1–3 prioritised next steps
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not is_gemini_available():
+        return _counterfactual_fallback(payload)
+
+    course = payload.course_name or "this course"
+    failed_str = "; ".join(payload.checks_failed) if payload.checks_failed else "none"
+    risks_str  = "; ".join(payload.counsellor_risks) if payload.counsellor_risks else "none noted"
+    ps_str = f"PS band: {payload.ps_band}" if payload.ps_band else ("PS submitted but not scored" if payload.has_ps else "No PS submitted")
+
+    prompt = f"""You are a UK university admissions advisor explaining an AI assessment result to a student.
+
+Result:
+- Course: {course}
+- Band: {payload.band}
+- Chance score: {payload.chance_percent}%
+- Failed checks: {failed_str}
+- Admissions risks: {risks_str}
+- {ps_str}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "plain_english": "<2 sentences explaining what this result means in plain, honest language>",
+  "if_grades_improve": "<1–2 sentences: what concretely changes if grades improve, be specific about the gap>",
+  "if_ps_improves": "<1–2 sentences: what changes if PS improves, or null if no PS>",
+  "confidence_note": "<1 sentence calibrating how certain this result is>",
+  "key_actions": ["<action 1>", "<action 2>"]
+}}
+
+Rules:
+- plain_english ≤ 40 words, honest not cheerleading
+- if_grades_improve ≤ 35 words, reference the specific gap if possible
+- if_ps_improves ≤ 35 words, or null if no PS
+- confidence_note ≤ 20 words
+- 1–3 key_actions, each ≤ 20 words
+- Never promise outcomes or invent statistics
+- Confidence language: "high confidence", "moderate confidence", "lower confidence" only"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        return _counterfactual_fallback(payload)
+
+    fallback = _counterfactual_fallback(payload)
+    return {
+        "status": "ok",
+        "plain_english":    result.get("plain_english")    or fallback["plain_english"],
+        "if_grades_improve": result.get("if_grades_improve") or fallback["if_grades_improve"],
+        "if_ps_improves":   result.get("if_ps_improves"),
+        "confidence_note":  result.get("confidence_note")  or fallback["confidence_note"],
+        "key_actions":      result.get("key_actions")      or fallback["key_actions"],
+        "provider_meta":    {"latency_ms": latency_ms},
+    }
