@@ -1,8 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { loadAssessment } from "@/lib/storage";
-import type { OfferAssessResponse } from "@/lib/types";
+import { postResultCounterfactual } from "@/lib/api";
+import { AIBlock } from "@/components/ai/AIBlock";
+import type { AIStatus, OfferAssessResponse, ResultCounterfactualResponse } from "@/lib/types";
 
 const BS: Record<string, any> = {
   Safe:   { bg: "var(--safe-bg)", color: "var(--safe-t)", border: "var(--safe-b)", bar: "var(--safe-t)" },
@@ -24,9 +26,45 @@ function Bullets({ items }: { items: string[] }) {
 }
 
 export default function ResultPage() {
-  const [data, setData] = useState<OfferAssessResponse | null>(null);
+  const [data, setData]       = useState<OfferAssessResponse | null>(null);
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); setData(loadAssessment()); }, []);
+
+  // ── Counterfactual AI block ────────────────────────────────────
+  const [cfData,   setCfData]   = useState<ResultCounterfactualResponse | null>(null);
+  const [cfStatus, setCfStatus] = useState<AIStatus>("idle");
+  const [cfError,  setCfError]  = useState<string | null>(null);
+
+  const fetchCounterfactual = useCallback(async (assessment: OfferAssessResponse) => {
+    setCfStatus("loading");
+    setCfError(null);
+    try {
+      const res = await postResultCounterfactual({
+        band:               assessment.band,
+        chance_percent:     assessment.chance_percent,
+        course_name:        assessment.course?.course_name ?? null,
+        checks_passed:      assessment.checks?.passed  ?? [],
+        checks_failed:      assessment.checks?.failed  ?? [],
+        counsellor_strengths: assessment.counsellor?.strengths ?? [],
+        counsellor_risks:     assessment.counsellor?.risks     ?? [],
+        has_ps:             !!assessment.ps_analysis,
+        ps_band:            assessment.ps_analysis?.scores?.band ?? null,
+      });
+      setCfData(res);
+      setCfStatus("ok");
+    } catch (e: unknown) {
+      setCfError((e instanceof Error ? e.message : null) ?? "Could not load AI analysis.");
+      setCfStatus("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+    const loaded = loadAssessment();
+    setData(loaded);
+    if (loaded) fetchCounterfactual(loaded);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (!mounted) return null;
 
   if (!data) return (
@@ -87,6 +125,59 @@ export default function ResultPage() {
           </p>
         </div>
       )}
+
+      {/* AI counterfactual block */}
+      <div className="card" style={{ marginBottom: "10px" }}>
+        <p className="label" style={{ marginBottom: "14px" }}>AI analysis</p>
+        <AIBlock
+          status={cfStatus}
+          error={cfError ?? undefined}
+          onRetry={() => data && fetchCounterfactual(data)}
+          skeletonLines={3}
+        >
+          {cfData && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {/* Plain English */}
+              <p style={{ fontSize: "14px", color: "var(--t2)", lineHeight: 1.7 }}>
+                {cfData.plain_english}
+              </p>
+
+              {/* Confidence note */}
+              <p style={{ fontSize: "12px", color: "var(--t3)", fontStyle: "italic" }}>
+                {cfData.confidence_note}
+              </p>
+
+              {/* Counterfactuals */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                <div style={{ padding: "13px 16px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "10px" }}>
+                  <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>If grades improve</p>
+                  <p style={{ fontSize: "13px", color: "var(--t2)", lineHeight: 1.65 }}>{cfData.if_grades_improve}</p>
+                </div>
+                {cfData.if_ps_improves && (
+                  <div style={{ padding: "13px 16px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "10px" }}>
+                    <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "6px" }}>If PS improves</p>
+                    <p style={{ fontSize: "13px", color: "var(--t2)", lineHeight: 1.65 }}>{cfData.if_ps_improves}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Key actions */}
+              {cfData.key_actions?.length > 0 && (
+                <div style={{ marginTop: "4px" }}>
+                  <p style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Priority actions</p>
+                  <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {cfData.key_actions.map((action, i) => (
+                      <li key={i} style={{ display: "flex", gap: "10px", fontSize: "13px", color: "var(--t2)", lineHeight: 1.65 }}>
+                        <span style={{ color: "var(--acc)", flexShrink: 0 }}>→</span>{action}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </AIBlock>
+      </div>
 
       {/* Checks */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>

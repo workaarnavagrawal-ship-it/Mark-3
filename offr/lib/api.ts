@@ -1,8 +1,14 @@
 import type {
   CourseDetail,
   CourseListItem,
+  DashboardInsightsRequest,
+  DashboardInsightsResponse,
   OfferAssessRequest,
   OfferAssessResponse,
+  PortfolioAdviceRequest,
+  PortfolioAdviceResponse,
+  SuggestRequest,
+  SuggestResponse,
   UniversityItem,
   UniqueCourse,
   UniqueCourseDetail,
@@ -32,10 +38,49 @@ export const postOfferAssess = (body: OfferAssessRequest) =>
     body: JSON.stringify(body),
   });
 
-// ── Course suggestion (strategy page) ────────────────────────────
-// ASSUMPTION: endpoint /api/py/suggest accepts SuggestRequest
-export const postSuggest = (body: import("./types").SuggestRequest) =>
-  apiFetch<import("./types").SuggestResponse>("/suggest", {
+// ── Course suggestions (strategy > alternatives tab) ─────────────
+export const postSuggest = (body: SuggestRequest) =>
+  apiFetch<SuggestResponse>("/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Portfolio advice (strategy > mix tab + tracker) ──────────────
+export const postPortfolioAdvice = (body: PortfolioAdviceRequest) =>
+  apiFetch<PortfolioAdviceResponse>("/portfolio_advice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Dashboard AI insights ────────────────────────────────────
+export const postDashboardInsights = (body: DashboardInsightsRequest) =>
+  apiFetch<DashboardInsightsResponse>("/dashboard_insights", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Profile AI suggestions ────────────────────────────────────────
+export const postProfileSuggestions = (body: import("./types").ProfileSuggestionsRequest) =>
+  apiFetch<import("./types").ProfileSuggestionsResponse>("/profile_suggestions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Tracker label suggestions ────────────────────────────────────
+export const postLabelSuggestions = (body: import("./types").LabelSuggestionsRequest) =>
+  apiFetch<import("./types").LabelSuggestionsResponse>("/label_suggestions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Result counterfactual ─────────────────────────────────────────
+export const postResultCounterfactual = (body: import("./types").ResultCounterfactualRequest) =>
+  apiFetch<import("./types").ResultCounterfactualResponse>("/result_counterfactual", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

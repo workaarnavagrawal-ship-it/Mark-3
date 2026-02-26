@@ -1045,6 +1045,101 @@ def _fallback_ps_analysis(
 # Now filters to same faculty first, then vectorised extraction.
 # ─────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────
+# Interest keyword map — mirrors lib/explore.ts INTEREST_KEYWORDS
+# Kept in sync manually; used for server-side course scoring.
+# ─────────────────────────────────────────────────────────────
+
+INTEREST_KEYWORDS: Dict[str, List[str]] = {
+    "politics":        ["politics","political","government","governance","international relations","public policy","policy","diplomacy"],
+    "economics":       ["economics","economic","finance","financial","business","management","accounting","banking","commerce"],
+    "sociology":       ["sociology","sociolog","social","anthropolog","human geograph","development studies","cultural"],
+    "psychology":      ["psychology","psycholog","cognitive","neuroscience","behavioural","behavioral","mental health","counselling"],
+    "law":             ["law","legal","criminology","criminal justice","jurisprudence"],
+    "history":         ["history","histor","archaeology","classics","ancient","medieval","heritage"],
+    "philosophy":      ["philosophy","ethics","logic","moral"],
+    "geography":       ["geography","geograph","environmental","urban planning","urban studies","sustainability","climate"],
+    "mathematics":     ["mathematics","maths","math","statistics","statistical","actuarial","data science","quantitative"],
+    "physics":         ["physics","astrophysics","astronomy","cosmology","quantum"],
+    "chemistry":       ["chemistry","chemical","biochemistry","pharmaceutical","pharmacology","materials science"],
+    "biology":         ["biology","biological","ecology","zoology","botany","genetics","microbiology","neuroscience","anatomy"],
+    "engineering":     ["engineering","engineer","mechanical","civil","electrical","electronic","aerospace","structural"],
+    "computer science":["computer science","computing","software","artificial intelligence","machine learning","data","cybersecurity","information technology"],
+    "medicine":        ["medicine","medical","dentistry","nursing","healthcare","health science","biomedical","pharmacy","physiotherapy"],
+    "english":         ["english literature","english language","literature","creative writing","linguistics","journalism","media"],
+    "languages":       ["languages","modern languages","french","spanish","german","chinese","japanese","arabic","translation","linguistics"],
+    "art":             ["art","fine art","design","architecture","fashion","illustration","film","photography","theatre","drama","music","performing arts"],
+    "business studies":["business","management","marketing","entrepreneurship","commerce","accounting","finance","economics"],
+}
+
+
+def _get_keywords(interest: str) -> List[str]:
+    lower = interest.lower().strip()
+    if lower in INTEREST_KEYWORDS:
+        return INTEREST_KEYWORDS[lower]
+    for key, kws in INTEREST_KEYWORDS.items():
+        if lower in key or key in lower:
+            return kws
+    return [lower]
+
+
+def _score_course_interest(course_name: str, faculty: str, interests: List[str]) -> Tuple[int, str, str]:
+    """Returns (score, top_interest, matched_keyword) for a course against interests."""
+    text = f"{course_name} {faculty}".lower()
+    best_score, best_interest, best_kw = 0, "", ""
+    for interest in interests:
+        kws = _get_keywords(interest)
+        matched = [kw for kw in kws if kw in text]
+        if len(matched) > best_score:
+            best_score = len(matched)
+            best_interest = interest
+            best_kw = max(matched, key=len) if matched else ""
+    return best_score, best_interest, best_kw
+
+
+def _deterministic_suggestions(
+    interests: List[str],
+    exclude_names: List[str],
+    top_n: int = 6,
+) -> List[Dict[str, Any]]:
+    """Server-side equivalent of computeHiddenGems in lib/explore.ts."""
+    if not interests:
+        return []
+    df = load_df()
+    excl_lower = {n.lower().strip() for n in exclude_names}
+
+    # Aggregate to unique courses
+    grp = df.groupby("course_name", as_index=False).agg(
+        faculty=("faculty", "first"),
+        universities_count=("university_id", "nunique"),
+        faculties=("faculty", lambda x: list({str(v) for v in x if pd.notna(v)})),
+    )
+
+    scored: List[Tuple[int, str, str, Dict[str, Any]]] = []
+    seen_names: set = set()
+    for _, row in grp.iterrows():
+        name = str(row["course_name"])
+        if name.lower().strip() in excl_lower:
+            continue
+        if name in seen_names:
+            continue
+        seen_names.add(name)
+        score, top_interest, top_kw = _score_course_interest(
+            name, str(row.get("faculty") or ""), interests
+        )
+        if score > 0:
+            reason = f"Matches your interest in {top_interest} — based on \"{top_kw}\" alignment"
+            scored.append((score, top_interest, reason, {
+                "course_name": name,
+                "universities_count": int(row.get("universities_count") or 1),
+                "faculties": row.get("faculties") or [],
+                "reason": reason,
+            }))
+
+    scored.sort(key=lambda x: (-x[0], x[3]["course_name"]))
+    return [s[3] for s in scored[:top_n]]
+
+
 def suggest_alternatives(course_id: str, home_min_target: Optional[int]) -> Dict[str, Any]:
     df = load_df()
     this_row = df[df["course_id"] == course_id]
@@ -1558,3 +1653,771 @@ async def analyse_ps(request: Request):
             status_code=500,
         )
     return JSONResponse(result)
+
+
+# ─────────────────────────────────────────────────────────────
+# Dashboard AI insights — /api/py/dashboard_insights
+# Deterministic inputs in → AI explanation + gap analysis out.
+# Falls back gracefully if Gemini is unavailable.
+# ─────────────────────────────────────────────────────────────
+
+class DashboardInsightsRequest(BaseModel):
+    curriculum: str                        # "IB" | "A_LEVELS"
+    year: str                              # "11" | "12"
+    interests: List[str]
+    has_ps: bool
+    has_subjects: bool
+    assessments_count: int
+    bands: Dict[str, int]                  # {"Safe": 1, "Target": 2, "Reach": 0}
+    shortlisted_count: int
+    ib_score: Optional[int] = None         # IB only; None for A-Level
+    a_level_grades: Optional[List[str]] = None   # A-Level only
+
+
+class DashboardInsightsResponse(BaseModel):
+    status: str = "ok"
+    what_to_do_next: str
+    profile_gaps: List[str]
+    clarity_summary: str
+    portfolio_insight: Optional[str] = None
+
+
+def _dashboard_insights_fallback(req: DashboardInsightsRequest) -> Dict[str, Any]:
+    """Rule-based fallback when Gemini is unavailable."""
+    gaps: List[str] = []
+    if not req.has_subjects:
+        gaps.append("Add your predicted grades so assessments can be calculated accurately.")
+    if not req.has_ps:
+        gaps.append("Write your personal statement — it affects PS fit scoring in assessments.")
+    if req.assessments_count == 0:
+        gaps.append("Run your first offer assessment to see where you stand.")
+    if req.shortlisted_count == 0:
+        gaps.append("Shortlist at least one course on the Explore page.")
+
+    # What to do next: most urgent gap, or portfolio insight
+    if not req.has_subjects:
+        next_action = "Add your predicted grades in Profile so assessments work correctly."
+    elif not req.has_ps:
+        next_action = "Draft your personal statement in Profile — it significantly affects your PS fit score."
+    elif req.assessments_count == 0:
+        next_action = "Run an assessment on a course you are considering to see your realistic chances."
+    elif req.shortlisted_count == 0:
+        next_action = "Explore courses and shortlist the ones that interest you most."
+    else:
+        total = req.assessments_count
+        reaches = req.bands.get("Reach", 0)
+        if total > 0 and reaches / total > 0.6:
+            next_action = "Your portfolio is heavy on Reach choices. Consider adding some safer options."
+        else:
+            next_action = "Your application is taking shape. Review your tracker and finalise your five UCAS choices."
+
+    portfolio_insight = None
+    if req.assessments_count > 0:
+        safe = req.bands.get("Safe", 0)
+        target = req.bands.get("Target", 0)
+        reach = req.bands.get("Reach", 0)
+        portfolio_insight = f"{safe} Safe, {target} Target, {reach} Reach across {req.assessments_count} assessed choice(s)."
+
+    score_str = ""
+    if req.curriculum == "IB" and req.ib_score:
+        score_str = f" with a predicted IB score of {req.ib_score}/45"
+
+    clarity = f"You are a Year {req.year} {req.curriculum.replace('_', '-')} student{score_str} interested in {', '.join(req.interests) if req.interests else 'exploring options'}."
+
+    return {
+        "status": "ok",
+        "what_to_do_next": next_action,
+        "profile_gaps": gaps,
+        "clarity_summary": clarity,
+        "portfolio_insight": portfolio_insight,
+    }
+
+
+@app.post("/api/py/dashboard_insights")
+async def dashboard_insights(payload: DashboardInsightsRequest):
+    """
+    Returns AI-generated dashboard insights: next action, profile gaps,
+    a one-sentence clarity summary, and portfolio commentary.
+
+    Uses Gemini when available; falls back to rule-based output silently.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not is_gemini_available():
+        return _dashboard_insights_fallback(payload)
+
+    bands_str = ", ".join(f"{k}: {v}" for k, v in payload.bands.items() if v > 0) or "none yet"
+    score_line = ""
+    if payload.curriculum == "IB" and payload.ib_score is not None:
+        score_line = f"Predicted IB score: {payload.ib_score}/45"
+    elif payload.a_level_grades:
+        score_line = f"Predicted A-Level grades: {', '.join(payload.a_level_grades[:4])}"
+
+    prompt = f"""You are a supportive UK UCAS admissions advisor helping a student understand where they stand and what to do next.
+
+Student profile:
+- Curriculum: {payload.curriculum.replace("_", "-")}
+- Year: {payload.year}
+- Interests: {", ".join(payload.interests) if payload.interests else "not specified"}
+- {score_line}
+- Has predicted grades entered: {payload.has_subjects}
+- Has personal statement: {payload.has_ps}
+- Courses assessed: {payload.assessments_count}
+- Assessment bands: {bands_str}
+- Courses shortlisted: {payload.shortlisted_count}
+
+Your task: return ONLY valid JSON (no markdown, no fences) with this exact structure:
+{{
+  "what_to_do_next": "<single most important action, 1–2 sentences, specific and encouraging>",
+  "profile_gaps": ["<gap 1>", "<gap 2>"],
+  "clarity_summary": "<one sentence honest summary of current position>",
+  "portfolio_insight": "<one sentence on band mix if assessments > 0, else null>"
+}}
+
+Rules:
+- profile_gaps should list 1–3 concrete missing or weak items (empty array [] if profile looks complete)
+- what_to_do_next should be the single highest-priority next step
+- clarity_summary should be factual and grounding, not cheerleading
+- portfolio_insight is null if no assessments exist
+- Never invent scores or outcomes
+- Keep all text concise (≤ 30 words each)"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        # Graceful fallback — never let this endpoint crash the dashboard
+        fallback = _dashboard_insights_fallback(payload)
+        fallback["_fallback"] = True
+        return fallback
+
+    # Merge status field and ensure required keys exist
+    fallback = _dashboard_insights_fallback(payload)
+    return {
+        "status": "ok",
+        "what_to_do_next": result.get("what_to_do_next") or fallback["what_to_do_next"],
+        "profile_gaps": result.get("profile_gaps") or fallback["profile_gaps"],
+        "clarity_summary": result.get("clarity_summary") or fallback["clarity_summary"],
+        "portfolio_insight": result.get("portfolio_insight") or fallback["portfolio_insight"],
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Course suggestions — /api/py/suggest
+# Deterministic interest-scored courses + AI tradeoff reasoning.
+# Used by Strategy > Alternatives tab.
+# ─────────────────────────────────────────────────────────────
+
+class SuggestRequest(BaseModel):
+    interests: List[str]
+    curriculum: str
+    exclude_course_names: List[str] = []
+    top_n: int = Field(default=6, ge=1, le=12)
+
+
+@app.post("/api/py/suggest")
+async def suggest(payload: SuggestRequest):
+    """
+    Returns interest-matched course suggestions with AI tradeoff reasoning.
+
+    Deterministic layer: keyword-scored course matching (same logic as lib/explore.ts).
+    AI layer: personalised tradeoff notes per suggestion + overall strategy note.
+    Fallback: heuristic-only results if Gemini unavailable.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    suggestions = _deterministic_suggestions(
+        payload.interests,
+        payload.exclude_course_names,
+        payload.top_n,
+    )
+
+    if not suggestions:
+        return {
+            "status": "ok",
+            "suggestions": [],
+            "portfolio_strategy": None,
+        }
+
+    if not is_gemini_available():
+        return {
+            "status": "ok",
+            "suggestions": suggestions,
+            "portfolio_strategy": None,
+            "_fallback": True,
+        }
+
+    # Build a concise list for the prompt
+    course_list = "\n".join(
+        f"- {s['course_name']} (offered at {s['universities_count']} uni(s))"
+        for s in suggestions
+    )
+
+    prompt = f"""You are a UK UCAS admissions advisor helping a {payload.curriculum.replace("_", "-")} student explore alternative courses.
+
+Student interests: {", ".join(payload.interests)}
+
+The following courses were matched deterministically to their interests:
+{course_list}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "tradeoffs": {{
+    "<course_name>": "<1 sentence: why this is a strong fit for these interests, mention one tradeoff or consideration — be specific, not generic>"
+  }},
+  "portfolio_strategy": "<2 sentences max: overall advice on how these alternatives could strengthen a UCAS portfolio for someone with these interests>"
+}}
+
+Rules:
+- tradeoffs keys must exactly match the course names listed above
+- Each tradeoff must be ≤ 25 words
+- portfolio_strategy ≤ 40 words
+- Never invent entry requirements or outcome statistics
+- Be encouraging but realistic"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid, temperature=0.4)
+
+    if err or result is None:
+        return {
+            "status": "ok",
+            "suggestions": suggestions,
+            "portfolio_strategy": None,
+            "_fallback": True,
+        }
+
+    # Merge AI tradeoffs into suggestions
+    tradeoffs: Dict[str, str] = result.get("tradeoffs") or {}
+    for s in suggestions:
+        s["tradeoff"] = tradeoffs.get(s["course_name"]) or s["reason"]
+
+    return {
+        "status": "ok",
+        "suggestions": suggestions,
+        "portfolio_strategy": result.get("portfolio_strategy") or None,
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Portfolio advice — /api/py/portfolio_advice
+# AI commentary on UCAS choice mix (Safe/Target/Reach balance).
+# Used by Strategy > Mix tab and Tracker page.
+# ─────────────────────────────────────────────────────────────
+
+class PortfolioAssessmentItem(BaseModel):
+    course_name: str
+    university_name: str
+    band: str
+    chance_percent: int
+
+
+class PortfolioAdviceRequest(BaseModel):
+    curriculum: str
+    interests: List[str]
+    bands: Dict[str, int]            # {"Safe": 1, "Target": 2, "Reach": 1}
+    assessments: List[PortfolioAssessmentItem]
+
+
+@app.post("/api/py/portfolio_advice")
+async def portfolio_advice(payload: PortfolioAdviceRequest):
+    """
+    AI commentary on a student's UCAS portfolio mix.
+
+    Deterministic fallback included — if Gemini fails, returns rule-based advice.
+    """
+    tid = uuid.uuid4().hex[:8]
+    total = len(payload.assessments)
+
+    # ── Deterministic fallback ─────────────────────────────────────
+    safe   = payload.bands.get("Safe", 0)
+    target = payload.bands.get("Target", 0)
+    reach  = payload.bands.get("Reach", 0)
+
+    def _rule_advice() -> Dict[str, Any]:
+        actions: List[str] = []
+        if safe == 0 and total >= 2:
+            actions.append("Add at least one Safe choice where you are comfortably above the typical offer.")
+        if target < 2 and total >= 3:
+            actions.append("Aim for 2–3 Target choices as the spine of a strong portfolio.")
+        if reach == 0 and total >= 4:
+            actions.append("Consider adding a Reach to your list — ambitious applications are often rewarded.")
+        if reach > 2:
+            actions.append("Your portfolio is heavy on Reaches. Make sure you have a genuine Safe fallback.")
+        if total < 5 and total > 0:
+            actions.append(f"You have {total} of 5 UCAS slots filled. Aim to complete your list.")
+
+        balance = "well-balanced" if (safe >= 1 and target >= 2 and reach >= 1) else "needs attention"
+        summary = f"Portfolio of {total}: {safe} Safe, {target} Target, {reach} Reach — {balance}."
+        return {
+            "status": "ok",
+            "strategy_summary": summary,
+            "risk_balance": "Balanced" if balance == "well-balanced" else "Review needed",
+            "actions": actions or ["Your portfolio looks healthy. Keep refining your personal statement."],
+        }
+
+    if not is_gemini_available() or total == 0:
+        return _rule_advice()
+
+    choices_str = "\n".join(
+        f"- {a.course_name} at {a.university_name}: {a.band} ({a.chance_percent}%)"
+        for a in payload.assessments
+    )
+
+    prompt = f"""You are a UCAS admissions strategist reviewing a student's portfolio.
+
+Curriculum: {payload.curriculum.replace("_", "-")}
+Interests: {", ".join(payload.interests) if payload.interests else "not specified"}
+Portfolio ({total} choices):
+{choices_str}
+
+Band summary: {safe} Safe, {target} Target, {reach} Reach
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "strategy_summary": "<2 sentences: honest assessment of this portfolio's balance and strength>",
+  "risk_balance": "<Safe-heavy | Balanced | Reach-heavy>",
+  "actions": ["<action 1>", "<action 2>"]
+}}
+
+Rules:
+- strategy_summary ≤ 40 words, honest not cheerleading
+- 1–3 actions, each ≤ 20 words
+- risk_balance must be exactly one of: Safe-heavy, Balanced, Reach-heavy
+- Never invent outcome statistics or university-specific data not provided"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        return _rule_advice()
+
+    fallback = _rule_advice()
+    return {
+        "status": "ok",
+        "strategy_summary": result.get("strategy_summary") or fallback["strategy_summary"],
+        "risk_balance": result.get("risk_balance") or fallback["risk_balance"],
+        "actions": result.get("actions") or fallback["actions"],
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Result counterfactual — /api/py/result_counterfactual
+# AI explains the verdict in plain English and generates
+# "if X improves" counterfactual reasoning.
+# Used by the result page after an assessment is loaded.
+# ─────────────────────────────────────────────────────────────
+
+class ResultCounterfactualRequest(BaseModel):
+    band: str                    # "Safe" | "Target" | "Reach"
+    chance_percent: int
+    course_name: Optional[str] = None
+    checks_passed: List[str] = []
+    checks_failed: List[str] = []
+    counsellor_strengths: List[str] = []
+    counsellor_risks: List[str] = []
+    has_ps: bool = False
+    ps_band: Optional[str] = None   # "Exceptional" | "Strong" | "Solid" | "Developing" | "Weak"
+
+
+def _counterfactual_fallback(req: ResultCounterfactualRequest) -> Dict[str, Any]:
+    band_msg = {
+        "Safe":   "Your grades comfortably meet the threshold and you rank well in the real applicant pool.",
+        "Target": "Your grades are close to the threshold — this could genuinely go either way.",
+        "Reach":  "There is a meaningful gap between your grades and the typical offer. You would need outstanding supporting material.",
+    }
+    grade_improve_msg = {
+        "Safe":   "Your grade profile already meets or exceeds the threshold. Maintaining your current trajectory is the priority.",
+        "Target": "Improving predicted grades by even 1–2 points could push you into the Safe band and significantly raise your chances.",
+        "Reach":  "If your grades improve substantially (e.g. by 4+ IB points or a grade step in key A-Level subjects), you would re-enter the Target range and become competitive.",
+    }
+    ps_improve_msg = {
+        "Safe":   "A strong PS will reinforce your application — it may not change your band but it distinguishes you from other Safe applicants.",
+        "Target": "At this level, a well-evidenced PS that demonstrates genuine interest in the subject could tip the decision in your favour.",
+        "Reach":  "For Reach applications, a truly exceptional PS that shows intellectual depth and course-specific preparation is one of the few things that can overcome a grade gap.",
+    }
+    confidence = {
+        "Safe":   "High confidence in this assessment — your profile is consistently above threshold.",
+        "Target": "Moderate confidence — small changes in grade projections or PS quality could shift this either way.",
+        "Reach":  "Lower confidence — Reach results depend heavily on factors not captured in grades alone.",
+    }
+    band = req.band if req.band in band_msg else "Reach"
+    return {
+        "status": "ok",
+        "plain_english": band_msg[band],
+        "if_grades_improve": grade_improve_msg[band],
+        "if_ps_improves": ps_improve_msg[band] if req.has_ps or req.ps_band else None,
+        "confidence_note": confidence[band],
+        "key_actions": [r for r in req.counsellor_risks[:2]],
+    }
+
+
+@app.post("/api/py/result_counterfactual")
+async def result_counterfactual(payload: ResultCounterfactualRequest):
+    """
+    AI-generated counterfactual reasoning for a result page.
+
+    Takes assessment outputs as input and returns:
+    - plain_english: verdict explained simply
+    - if_grades_improve: what would change and why
+    - if_ps_improves: PS-specific counterfactual (null if no PS)
+    - confidence_note: calibration language
+    - key_actions: 1–3 prioritised next steps
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not is_gemini_available():
+        return _counterfactual_fallback(payload)
+
+    course = payload.course_name or "this course"
+    failed_str = "; ".join(payload.checks_failed) if payload.checks_failed else "none"
+    risks_str  = "; ".join(payload.counsellor_risks) if payload.counsellor_risks else "none noted"
+    ps_str = f"PS band: {payload.ps_band}" if payload.ps_band else ("PS submitted but not scored" if payload.has_ps else "No PS submitted")
+
+    prompt = f"""You are a UK university admissions advisor explaining an AI assessment result to a student.
+
+Result:
+- Course: {course}
+- Band: {payload.band}
+- Chance score: {payload.chance_percent}%
+- Failed checks: {failed_str}
+- Admissions risks: {risks_str}
+- {ps_str}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "plain_english": "<2 sentences explaining what this result means in plain, honest language>",
+  "if_grades_improve": "<1–2 sentences: what concretely changes if grades improve, be specific about the gap>",
+  "if_ps_improves": "<1–2 sentences: what changes if PS improves, or null if no PS>",
+  "confidence_note": "<1 sentence calibrating how certain this result is>",
+  "key_actions": ["<action 1>", "<action 2>"]
+}}
+
+Rules:
+- plain_english ≤ 40 words, honest not cheerleading
+- if_grades_improve ≤ 35 words, reference the specific gap if possible
+- if_ps_improves ≤ 35 words, or null if no PS
+- confidence_note ≤ 20 words
+- 1–3 key_actions, each ≤ 20 words
+- Never promise outcomes or invent statistics
+- Confidence language: "high confidence", "moderate confidence", "lower confidence" only"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        return _counterfactual_fallback(payload)
+
+    fallback = _counterfactual_fallback(payload)
+    return {
+        "status": "ok",
+        "plain_english":    result.get("plain_english")    or fallback["plain_english"],
+        "if_grades_improve": result.get("if_grades_improve") or fallback["if_grades_improve"],
+        "if_ps_improves":   result.get("if_ps_improves"),
+        "confidence_note":  result.get("confidence_note")  or fallback["confidence_note"],
+        "key_actions":      result.get("key_actions")      or fallback["key_actions"],
+        "provider_meta":    {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Label suggestions — /api/py/label_suggestions
+# AI suggests a UCAS label (Firm / Insurance / Wildcard / Backup)
+# for each assessed choice in the context of the full portfolio.
+# ─────────────────────────────────────────────────────────────
+
+class LabelEntry(BaseModel):
+    course_name: str
+    university_name: str
+    band: str
+    chance_percent: int
+
+
+class LabelSuggestionsRequest(BaseModel):
+    entries: List[LabelEntry]
+
+
+VALID_LABELS = {"Firm", "Insurance", "Backup", "Wildcard", "Undecided"}
+
+
+def _label_fallback(entries: List[LabelEntry]) -> Dict[str, Any]:
+    """Rule-based label assignment based on band and relative position."""
+    if not entries:
+        return {"status": "ok", "suggestions": {}}
+
+    sorted_by_chance = sorted(entries, key=lambda e: e.chance_percent, reverse=True)
+    suggestions: Dict[str, Dict[str, str]] = {}
+
+    for i, entry in enumerate(sorted_by_chance):
+        if entry.band == "Safe":
+            label = "Insurance"
+            reason = "Safe choices work best as insurance — comfortably above threshold."
+        elif entry.band == "Reach":
+            label = "Wildcard"
+            reason = "Reach choices are aspirational — label as wildcard and keep safer fallbacks."
+        else:
+            if i == 0 and entry.chance_percent >= 55:
+                label = "Firm"
+                reason = "Your strongest Target — a natural firm choice candidate."
+            else:
+                label = "Backup"
+                reason = "A Target with lower odds — good as backup alongside stronger Targets."
+        suggestions[entry.course_name] = {"label": label, "reason": reason}
+
+    return {"status": "ok", "suggestions": suggestions}
+
+
+@app.post("/api/py/label_suggestions")
+async def label_suggestions(payload: LabelSuggestionsRequest):
+    """
+    Returns AI-suggested UCAS labels for each choice in the portfolio.
+    Considers the full portfolio context — not each entry in isolation.
+    Falls back to rule-based labels when Gemini is unavailable.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not payload.entries:
+        return {"status": "ok", "suggestions": {}}
+
+    if not is_gemini_available():
+        return _label_fallback(payload.entries)
+
+    portfolio_str = "\n".join(
+        f"- {e.course_name} at {e.university_name}: {e.band} ({e.chance_percent}%)"
+        for e in payload.entries
+    )
+
+    prompt = f"""You are a UCAS advisor helping a student label their university choices.
+
+UCAS labels: Firm (top choice), Insurance (safe fallback), Backup (additional option),
+Wildcard (aspirational Reach), Undecided (not sure yet).
+
+Student's portfolio:
+{portfolio_str}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "suggestions": {{
+    "<exact course_name>": {{
+      "label": "<Firm|Insurance|Backup|Wildcard|Undecided>",
+      "reason": "<1 sentence why in context of full portfolio — ≤ 20 words>"
+    }}
+  }}
+}}
+
+Rules:
+- Keys must exactly match the course names listed above
+- Don't suggest two Firms; ensure at least one Insurance if >1 entry
+- Be specific about portfolio context, not generic
+- Reach → Wildcard is usually correct; Safe → Insurance usually correct"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid, temperature=0.3)
+
+    if err or result is None:
+        return _label_fallback(payload.entries)
+
+    raw = result.get("suggestions") or {}
+    fallback_sugg = _label_fallback(payload.entries)["suggestions"]
+    cleaned: Dict[str, Dict[str, str]] = {}
+    for entry in payload.entries:
+        name = entry.course_name
+        ai_s = raw.get(name) or {}
+        lbl = ai_s.get("label") if ai_s.get("label") in VALID_LABELS else (fallback_sugg.get(name) or {}).get("label", "Undecided")
+        rsn = ai_s.get("reason") or (fallback_sugg.get(name) or {}).get("reason", "")
+        cleaned[name] = {"label": lbl, "reason": rsn}
+
+    return {
+        "status": "ok",
+        "suggestions": cleaned,
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# Profile suggestions — /api/py/profile_suggestions
+# AI reviews profile completeness and returns specific,
+# actionable improvement tips for each weak area.
+# ─────────────────────────────────────────────────────────────
+
+class ProfileSuggestionsRequest(BaseModel):
+    curriculum: str
+    year: str
+    interests_count: int
+    has_grades: bool
+    has_ps: bool
+    ps_length: int          # character count (0 if not set)
+    ib_total: Optional[int] = None
+    a_level_count: Optional[int] = None
+
+
+def _profile_suggestions_fallback(req: ProfileSuggestionsRequest) -> Dict[str, Any]:
+    suggestions: List[Dict[str, str]] = []
+    if req.interests_count == 0:
+        suggestions.append({
+            "field": "interests",
+            "why": "Interests drive Hidden Gems recommendations and Alternative course suggestions across the app.",
+            "action": "Add up to 3 interests in the interests section.",
+        })
+    elif req.interests_count < 3:
+        suggestions.append({
+            "field": "interests",
+            "why": "More interests produce more personalised course recommendations.",
+            "action": f"Add {3 - req.interests_count} more interest(s) to maximise Hidden Gems results.",
+        })
+    if not req.has_grades:
+        suggestions.append({
+            "field": "grades",
+            "why": "Predicted grades are the primary input to offer chance calculations (Safe/Target/Reach).",
+            "action": "Add your predicted grades — assessments cannot score you without them.",
+        })
+    if not req.has_ps:
+        suggestions.append({
+            "field": "ps",
+            "why": "Your personal statement affects PS fit scoring in assessments and unlocks line-by-line analysis.",
+            "action": "Add a draft PS below — even rough notes help. Analyse it on the PS page.",
+        })
+    elif req.ps_length < 500:
+        suggestions.append({
+            "field": "ps",
+            "why": "A short PS provides limited signal for analysis tools.",
+            "action": f"Your PS is {req.ps_length} characters. Aim for 2,000+ for meaningful feedback.",
+        })
+    if not suggestions:
+        suggestions.append({
+            "field": "complete",
+            "why": "Your profile is well-populated — all core fields are filled.",
+            "action": "Keep grades and PS updated as they change; assessment accuracy depends on current data.",
+        })
+    return {"status": "ok", "suggestions": suggestions}
+
+
+@app.post("/api/py/profile_suggestions")
+async def profile_suggestions(payload: ProfileSuggestionsRequest):
+    """
+    Returns AI-generated profile improvement suggestions.
+    Deterministic inputs explain what is missing and why it matters.
+    Falls back to rule-based suggestions when Gemini is unavailable.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not is_gemini_available():
+        return _profile_suggestions_fallback(payload)
+
+    gaps: List[str] = []
+    if payload.interests_count == 0:
+        gaps.append("No interests set")
+    elif payload.interests_count < 3:
+        gaps.append(f"Only {payload.interests_count} interest(s) set (max 3)")
+    if not payload.has_grades:
+        gaps.append("No predicted grades entered")
+    if not payload.has_ps:
+        gaps.append("No personal statement added")
+    elif payload.ps_length < 500:
+        gaps.append(f"PS is very short ({payload.ps_length} chars)")
+
+    if not gaps:
+        return _profile_suggestions_fallback(payload)
+
+    score_ctx = ""
+    if payload.curriculum == "IB" and payload.ib_total:
+        score_ctx = f"Predicted IB total: {payload.ib_total}/45."
+    elif payload.a_level_count:
+        score_ctx = f"Has {payload.a_level_count} A-Level subject(s) entered."
+
+    gaps_joined = "; ".join(gaps)
+    prompt = (
+        "You are advising a UK UCAS applicant on completing their profile in an admissions tool.\n\n"
+        f"Profile: {payload.curriculum.replace('_', '-')}, Year {payload.year}. {score_ctx}\n"
+        f"Gaps: {gaps_joined}\n\n"
+        "Field purposes in this tool:\n"
+        "- interests: drives Hidden Gems and Alternative course recommendations\n"
+        "- grades: primary input to offer chance calculations (Safe/Target/Reach)\n"
+        "- ps: affects PS fit score and unlocks line-by-line PS analysis\n\n"
+        'Return ONLY valid JSON:\n'
+        '{"suggestions": [{"field": "<interests|grades|ps|complete>", "why": "<specific to tool, <= 25 words>", "action": "<concrete next step, <= 20 words>"}]}\n\n'
+        "One object per gap (max 3). Be specific about this tool, not generic UCAS advice."
+    )
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        return _profile_suggestions_fallback(payload)
+
+    raw = result.get("suggestions") or []
+    if not raw:
+        return _profile_suggestions_fallback(payload)
+
+    return {
+        "status": "ok",
+        "suggestions": raw,
+        "provider_meta": {"latency_ms": latency_ms},
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# FAQ assistant — /api/py/ask_faq
+# Conversational assistant for UCAS / offr questions.
+# ─────────────────────────────────────────────────────────────
+
+OFFR_FAQ_CONTEXT = (
+    "offr is a UK UCAS admissions tool for Year 11-12 students.\n"
+    "Key features:\n"
+    "- Offer Assessment: calculates Safe/Target/Reach chance % using real 2024-25 offer holder data.\n"
+    "- Safe >70%, Target 40-70%, Reach <40%.\n"
+    "- PS Analyser: line-by-line feedback on UCAS personal statement.\n"
+    "- Tracker: UCAS portfolio tracker with AI label suggestions (Firm/Insurance/Backup/Wildcard).\n"
+    "- Explore: browse courses with AI Hidden Gems based on interests.\n"
+    "- Strategy: audits mix, PS tips, AI course alternatives.\n"
+    "- Dashboard: AI 'where you stand' summary.\n"
+    "Universities: Oxford, Cambridge, LSE, Imperial, UCL, Warwick, Edinburgh, Bristol, Durham, Bath, St Andrews, KCL, Manchester, Exeter.\n"
+    "Curricula: IB Diploma (max 45 pts) and A-Levels.\n"
+    "UCAS facts: max 5 choices, PS max 4,000 chars (3-question format from 2025 entry), Firm = first choice, Insurance = safe backup.\n"
+    "UCAS deadlines: 15 October for Oxford/Cambridge/medicine; 15 January for most others."
+)
+
+
+class AskFAQRequest(BaseModel):
+    question: str
+
+
+def _ask_faq_fallback() -> Dict[str, Any]:
+    return {
+        "status": "ok",
+        "answer": "AI assistant is not available right now. Browse the FAQ above or check the UCAS website for detailed guidance.",
+        "follow_up_questions": [],
+        "_fallback": True,
+    }
+
+
+@app.post("/api/py/ask_faq")
+async def ask_faq(payload: AskFAQRequest):
+    """
+    Conversational FAQ assistant. Answers UCAS and offr questions
+    using Gemini with embedded context. Falls back gracefully.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    question = (payload.question or "").strip()[:500]
+    if not question:
+        return JSONResponse({"error": "Question is required."}, status_code=400)
+
+    if not is_gemini_available():
+        return _ask_faq_fallback()
+
+    prompt = (
+        "You are a helpful UCAS admissions assistant for the offr tool.\n\n"
+        f"Context:\n{OFFR_FAQ_CONTEXT}\n\n"
+        f"Student question: {question}\n\n"
+        'Return ONLY valid JSON (no markdown): {"answer": "<2-4 sentences, ≤ 80 words>", "follow_up_questions": ["<q1>", "<q2>"]}\n\n'
+        "Rules: factual, grounded in context, friendly but concise. Say so honestly if you don't know."
+    )
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid, temperature=0.3)
+
+    if err or result is None:
+        return _ask_faq_fallback()
+
+    return {
+        "status": "ok",
+        "answer": result.get("answer") or "I could not generate an answer. Please try rephrasing.",
+        "follow_up_questions": result.get("follow_up_questions") or [],
+        "provider_meta": {"latency_ms": latency_ms},
+    }

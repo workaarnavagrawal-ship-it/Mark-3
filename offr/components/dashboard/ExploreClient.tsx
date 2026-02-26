@@ -6,10 +6,11 @@ import {
   listShortlistedCourses,
   addShortlistedCourse,
   removeShortlistedCourse,
+  postSuggest,
 } from "@/lib/api";
-import { computeHiddenGems } from "@/lib/explore";
+import { AIBlock } from "@/components/ai/AIBlock";
 import { CourseDetailModal } from "./CourseDetailModal";
-import type { UniqueCourse, HiddenGemRecommendation, ShortlistedCourse } from "@/lib/types";
+import type { AIStatus, UniqueCourse, HiddenGemRecommendation, ShortlistedCourse } from "@/lib/types";
 
 interface ExploreClientProps {
   interests: string[];
@@ -48,6 +49,8 @@ export function ExploreClient({ interests }: ExploreClientProps) {
         if (!cancelled) {
           setCourses(coursesData);
           setShortlistedKeys(new Set(shortlistData.map((s) => s.course_key)));
+          // Trigger AI gem loading now that courses are available
+          loadGems(coursesData);
         }
       } catch (e: any) {
         if (!cancelled) {
@@ -63,6 +66,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
     return () => {
       cancelled = true;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Shortlist toggle ──────────────────────────────────────────────
@@ -108,11 +112,35 @@ export function ExploreClient({ interests }: ExploreClientProps) {
     [shortlistedKeys, shortlistBusy],
   );
 
-  // ── Hidden gems ───────────────────────────────────────────────────
-  const hiddenGems = useMemo<HiddenGemRecommendation[]>(() => {
-    if (loading || !courses.length) return [];
-    return computeHiddenGems(interests, courses, 5);
-  }, [interests, courses, loading]);
+  // ── Hidden gems — AI-powered via /api/py/suggest ─────────────────
+  const [hiddenGems,   setHiddenGems]   = useState<HiddenGemRecommendation[]>([]);
+  const [gemsStatus,   setGemsStatus]   = useState<AIStatus>("idle");
+  const [gemsError,    setGemsError]    = useState<string | null>(null);
+
+  const loadGems = useCallback(async (allCourses: UniqueCourse[]) => {
+    if (!interests.length) return;
+    setGemsStatus("loading");
+    setGemsError(null);
+    try {
+      const res = await postSuggest({
+        interests,
+        curriculum: "IB",   // curriculum not critical for name-matching; explored cross-curriculum
+        top_n: 5,
+      });
+      // Map AI suggestions back to full UniqueCourse objects by name (for shortlist / modal)
+      const nameIndex = new Map(allCourses.map(c => [c.course_name.toLowerCase(), c]));
+      const gems: HiddenGemRecommendation[] = (res.suggestions ?? []).flatMap(s => {
+        const full = nameIndex.get(s.course_name.toLowerCase());
+        if (!full) return [];
+        return [{ course: full, reason: s.tradeoff || s.reason }];
+      });
+      setHiddenGems(gems);
+      setGemsStatus("ok");
+    } catch (e: unknown) {
+      setGemsError((e as Error)?.message ?? "Could not load suggestions.");
+      setGemsStatus("error");
+    }
+  }, [interests]);
 
   // ── Filtered course list ──────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -159,54 +187,42 @@ export function ExploreClient({ interests }: ExploreClientProps) {
         </p>
       </div>
 
-      {/* ── Hidden Gems ─────────────────────────────────────────────── */}
-      {!loading && !err && hiddenGems.length > 0 && (
+      {/* ── Hidden Gems — AI-powered ─────────────────────────────────── */}
+      {!loading && !err && interests.length > 0 && (
         <div style={{ marginBottom: "40px" }}>
           <div style={{ marginBottom: "14px" }}>
             <p className="label" style={{ marginBottom: "4px" }}>Personalised for you</p>
-            <h2
-              className="serif"
-              style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}
-            >
+            <h2 className="serif" style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}>
               Hidden Gems
             </h2>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {hiddenGems.map((gem) => (
-              <HiddenGemRow
-                key={gem.course.course_key}
-                gem={gem}
-                isShortlisted={shortlistedKeys.has(gem.course.course_key)}
-                shortlistBusy={shortlistBusy === gem.course.course_key}
-                onOpen={setOpenCourse}
-                onToggleShortlist={toggleShortlist}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Interests set but no courses matched → soft message */}
-      {!loading && !err && interests.length > 0 && hiddenGems.length === 0 && courses.length > 0 && (
-        <div
-          style={{
-            marginBottom: "28px",
-            padding: "14px 18px",
-            background: "var(--s2)",
-            border: "1px solid var(--b)",
-            borderRadius: "var(--r)",
-            fontSize: "13px",
-            color: "var(--t3)",
-          }}
-        >
-          No hidden gems found for your current interests. Try updating them in your{" "}
-          <Link
-            href="/dashboard/profile"
-            style={{ color: "var(--t)", textDecoration: "none", borderBottom: "1px solid var(--b-strong)" }}
+          <AIBlock
+            status={gemsStatus}
+            error={gemsError ?? undefined}
+            onRetry={() => loadGems(courses)}
+            skeletonLines={3}
           >
-            profile
-          </Link>
-          , or explore all courses below.
+            {hiddenGems.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {hiddenGems.map((gem) => (
+                  <HiddenGemRow
+                    key={gem.course.course_key}
+                    gem={gem}
+                    isShortlisted={shortlistedKeys.has(gem.course.course_key)}
+                    shortlistBusy={shortlistBusy === gem.course.course_key}
+                    onOpen={setOpenCourse}
+                    onToggleShortlist={toggleShortlist}
+                  />
+                ))}
+              </div>
+            ) : gemsStatus === "ok" ? (
+              <div style={{ padding: "14px 18px", background: "var(--s2)", border: "1px solid var(--b)", borderRadius: "var(--r)", fontSize: "13px", color: "var(--t3)" }}>
+                No hidden gems found for your current interests. Try updating them in your{" "}
+                <Link href="/dashboard/profile" style={{ color: "var(--t)", textDecoration: "none", borderBottom: "1px solid var(--b-strong)" }}>profile</Link>
+                , or explore all courses below.
+              </div>
+            ) : null}
+          </AIBlock>
         </div>
       )}
 

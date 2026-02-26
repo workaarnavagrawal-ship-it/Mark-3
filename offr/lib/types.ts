@@ -185,19 +185,70 @@ export interface OfferAssessResponse {
 // ── Persona ──────────────────────────────────────────────────────
 export type Persona = "explorer" | "optimizer" | "verifier";
 
-// ── Strategy / Compare ───────────────────────────────────────────
-// ASSUMPTION: backend returns this shape for /api/py/suggest
+// ── Strategy / Suggest ───────────────────────────────────────────
 export interface SuggestRequest {
-  course_id: string;
-  university_id: string;
   interests: string[];
   curriculum: string;
+  exclude_course_names?: string[];
+  top_n?: number;
+}
+
+export interface SuggestCourse {
+  course_name: string;
+  universities_count: number;
+  faculties: string[];
+  reason: string;
+  tradeoff?: string;   // AI-generated tradeoff note (may be absent if fallback)
 }
 
 export interface SuggestResponse {
-  pivots: CourseListItem[];        // same course, different uni
-  hidden_gems: CourseListItem[];   // less-known but well-matched
-  adjacent: CourseListItem[];      // related subject areas
+  status: "ok" | "error";
+  suggestions: SuggestCourse[];
+  portfolio_strategy: string | null;
+  provider_meta?: { latency_ms: number };
+  // error fields
+  error_code?: string;
+  message?: string;
+  retryable?: boolean;
+}
+
+// ── Portfolio advice ─────────────────────────────────────────────
+export interface PortfolioAdviceRequest {
+  curriculum: string;
+  interests: string[];
+  bands: Record<string, number>;
+  assessments: { course_name: string; university_name: string; band: string; chance_percent: number }[];
+}
+
+export interface PortfolioAdviceResponse {
+  status: "ok" | "error";
+  strategy_summary: string;
+  risk_balance: string;
+  actions: string[];
+  provider_meta?: { latency_ms: number };
+}
+
+// ── Result page counterfactual ─────────────────────────────────────
+export interface ResultCounterfactualRequest {
+  band: string;
+  chance_percent: number;
+  course_name?: string | null;
+  checks_passed?: string[];
+  checks_failed?: string[];
+  counsellor_strengths?: string[];
+  counsellor_risks?: string[];
+  has_ps?: boolean;
+  ps_band?: string | null;
+}
+
+export interface ResultCounterfactualResponse {
+  status: "ok" | "error";
+  plain_english: string;
+  if_grades_improve: string;
+  if_ps_improves: string | null;
+  confidence_note: string;
+  key_actions: string[];
+  provider_meta?: { latency_ms: number };
 }
 
 // ── What would improve ───────────────────────────────────────────
@@ -226,6 +277,73 @@ export interface PSAnalysisResponse {
   weaknesses: string[];
   topPriority: string;
   lineFeedback: PSLineFeedback[];
+}
+
+// ── Dashboard AI insights ──────────────────────────────────────────
+export interface DashboardInsightsRequest {
+  curriculum: string;
+  year: string;
+  interests: string[];
+  has_ps: boolean;
+  has_subjects: boolean;
+  assessments_count: number;
+  bands: Record<string, number>;
+  shortlisted_count: number;
+  ib_score?: number | null;
+  a_level_grades?: string[] | null;
+}
+
+export interface DashboardInsightsResponse {
+  status: "ok" | "error";
+  what_to_do_next: string;
+  profile_gaps: string[];
+  clarity_summary: string;
+  portfolio_insight: string | null;
+  provider_meta?: { latency_ms: number };
+  // error fields (when status === "error")
+  error_code?: string;
+  message?: string;
+  retryable?: boolean;
+}
+
+// ── Profile AI suggestions ────────────────────────────────────────────
+export interface ProfileSuggestionsRequest {
+  curriculum: string;
+  year: string;
+  interests_count: number;
+  has_grades: boolean;
+  has_ps: boolean;
+  ps_length: number;
+  ib_total?: number | null;
+  a_level_count?: number | null;
+}
+
+export interface ProfileSuggestion {
+  field: string;
+  why: string;
+  action: string;
+}
+
+export interface ProfileSuggestionsResponse {
+  status: "ok" | "error";
+  suggestions: ProfileSuggestion[];
+  provider_meta?: { latency_ms: number };
+}
+
+// ── Tracker label suggestions ────────────────────────────────────────
+export interface LabelSuggestionsRequest {
+  entries: { course_name: string; university_name: string; band: string; chance_percent: number }[];
+}
+
+export interface LabelSuggestion {
+  label: string;
+  reason: string;
+}
+
+export interface LabelSuggestionsResponse {
+  status: "ok" | "error";
+  suggestions: Record<string, LabelSuggestion>;  // keyed by course_name
+  provider_meta?: { latency_ms: number };
 }
 
 // ── Explore: Hidden gems & shortlist ────────────────────────────────

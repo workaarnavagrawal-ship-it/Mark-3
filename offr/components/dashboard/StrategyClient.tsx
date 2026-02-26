@@ -1,9 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import type { Profile, SubjectEntry, TrackerEntry, UniqueCourse } from "@/lib/types";
-import { getUniqueCourses } from "@/lib/api";
-import { computeHiddenGems } from "@/lib/explore";
+import type { Profile, SubjectEntry, TrackerEntry, SuggestCourse, PortfolioAdviceResponse } from "@/lib/types";
+import { postSuggest, postPortfolioAdvice } from "@/lib/api";
+import { AIBlock } from "@/components/ai/AIBlock";
 
 const BS: Record<string, any> = {
   Safe:   { bg: "var(--safe-bg)", color: "var(--safe-t)", border: "1px solid var(--safe-b)", bar: "var(--safe-t)" },
@@ -42,43 +42,77 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
   const mix = getMixAdvice(assessments);
 
   // ── Alternatives state ─────────────────────────────────────────
-  type AltResult = { course: UniqueCourse; reason: string };
-  const [alts, setAlts] = useState<AltResult[]>([]);
-  const [altsLoading, setAltsLoading] = useState(false);
+  const [alts, setAlts] = useState<SuggestCourse[]>([]);
+  const [portfolioStrategy, setPortfolioStrategy] = useState<string | null>(null);
+  const [altsStatus, setAltsStatus] = useState<"idle"|"loading"|"ok"|"error">("idle");
   const [altsErr, setAltsErr] = useState("");
 
-  // Fetch + score when alternatives tab first opens and there are interests
+  const loadAlts = useCallback(async () => {
+    if (!profile.interests?.length) return;
+    setAltsStatus("loading");
+    setAltsErr("");
+    try {
+      const excludeNames = assessments.map((a) => a.course_name?.trim() ?? "").filter(Boolean);
+      const res = await postSuggest({
+        interests: profile.interests,
+        curriculum: profile.curriculum,
+        exclude_course_names: excludeNames,
+        top_n: 6,
+      });
+      setAlts(res.suggestions ?? []);
+      setPortfolioStrategy(res.portfolio_strategy ?? null);
+      setAltsStatus("ok");
+    } catch (e: unknown) {
+      setAltsErr((e as Error)?.message || "Failed to load alternatives.");
+      setAltsStatus("error");
+    }
+  }, [profile.interests, profile.curriculum, assessments]);
+
+  // Fetch when alternatives tab first opens
   useEffect(() => {
     if (activeTab !== "alternatives") return;
-    if (!profile.interests?.length) return;
-    if (alts.length > 0 || altsLoading) return; // already loaded
-
-    let cancelled = false;
-    async function loadAlts() {
-      setAltsLoading(true);
-      setAltsErr("");
-      try {
-        const courses = await getUniqueCourses();
-        if (cancelled) return;
-
-        // Exclude courses already in the tracker
-        const trackerNames = new Set(
-          assessments.map((a) => a.course_name?.toLowerCase().trim())
-        );
-        const available = courses.filter(
-          (c) => !trackerNames.has(c.course_name.toLowerCase().trim())
-        );
-
-        const gems = computeHiddenGems(profile.interests ?? [], available, 6);
-        if (!cancelled) setAlts(gems.map((g) => ({ course: g.course, reason: g.reason })));
-      } catch (e: unknown) {
-        if (!cancelled) setAltsErr((e as Error)?.message || "Failed to load alternatives.");
-      } finally {
-        if (!cancelled) setAltsLoading(false);
-      }
-    }
+    if (altsStatus !== "idle") return;
     loadAlts();
-    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // ── Portfolio advice state ──────────────────────────────────────
+  const [portfolioAdvice, setPortfolioAdvice] = useState<PortfolioAdviceResponse | null>(null);
+  const [portfolioStatus, setPortfolioStatus] = useState<"idle"|"loading"|"ok"|"error">("idle");
+  const [portfolioErr, setPortfolioErr] = useState("");
+
+  const loadPortfolioAdvice = useCallback(async () => {
+    if (!assessments.length) return;
+    setPortfolioStatus("loading");
+    setPortfolioErr("");
+    const bands: Record<string, number> = { Safe: 0, Target: 0, Reach: 0 };
+    assessments.forEach((a) => { if (a.band in bands) bands[a.band]++; });
+    try {
+      const res = await postPortfolioAdvice({
+        curriculum: profile.curriculum,
+        interests: profile.interests ?? [],
+        bands,
+        assessments: assessments.map((a) => ({
+          course_name: a.course_name,
+          university_name: a.university_name,
+          band: a.band,
+          chance_percent: a.chance_percent,
+        })),
+      });
+      setPortfolioAdvice(res);
+      setPortfolioStatus("ok");
+    } catch (e: unknown) {
+      setPortfolioErr((e as Error)?.message || "Could not load AI advice.");
+      setPortfolioStatus("error");
+    }
+  }, [assessments, profile.curriculum, profile.interests]);
+
+  // Fetch portfolio advice when mix tab first opens with assessments
+  useEffect(() => {
+    if (activeTab !== "mix") return;
+    if (portfolioStatus !== "idle") return;
+    if (!assessments.length) return;
+    loadPortfolioAdvice();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -165,9 +199,9 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
                 </p>
               </div>
 
-              {/* Advice */}
+              {/* Rule-based advice */}
               {mix.advice.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "24px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
                   {mix.advice.map((tip, i) => (
                     <div key={i} style={{ padding: "14px 18px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "var(--ri)", display: "flex", gap: "12px" }}>
                       <span style={{ color: "var(--acc)", flexShrink: 0, marginTop: "1px" }}>→</span>
@@ -176,6 +210,36 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
                   ))}
                 </div>
               )}
+
+              {/* AI portfolio strategy block */}
+              <div style={{ marginBottom: "24px" }}>
+                <p className="label" style={{ marginBottom: "10px" }}>AI portfolio assessment</p>
+                <AIBlock
+                  status={portfolioStatus}
+                  error={portfolioErr || undefined}
+                  onRetry={loadPortfolioAdvice}
+                  skeletonLines={2}
+                >
+                  {portfolioAdvice && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <div style={{ padding: "14px 18px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "var(--ri)" }}>
+                        <p style={{ fontSize: "13px", color: "var(--t2)", lineHeight: 1.65, marginBottom: "6px" }}>
+                          {portfolioAdvice.strategy_summary}
+                        </p>
+                        <span style={{ fontSize: "11px", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          {portfolioAdvice.risk_balance}
+                        </span>
+                      </div>
+                      {portfolioAdvice.actions.map((action, i) => (
+                        <div key={i} style={{ padding: "12px 18px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "var(--ri)", display: "flex", gap: "10px" }}>
+                          <span style={{ color: "var(--acc)", flexShrink: 0 }}>→</span>
+                          <p style={{ fontSize: "13px", color: "var(--t2)", lineHeight: 1.6 }}>{action}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </AIBlock>
+              </div>
 
               {/* Choice list */}
               <div>
@@ -251,74 +315,73 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
               <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "16px" }}>Add interests to your profile to see personalised alternatives.</p>
               <Link href="/dashboard/profile" className="btn btn-ghost" style={{ fontSize: "13px" }}>Add interests →</Link>
             </div>
-          ) : altsLoading ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {[100, 85, 92, 78].map((w, i) => (
-                <div key={i} style={{
-                  height: "72px", borderRadius: "var(--r)",
-                  background: "var(--s2)",
-                  width: `${w}%`,
-                  animation: "offr-pulse 1.5s ease-in-out infinite",
-                  animationDelay: `${i * 0.1}s`,
-                }} />
-              ))}
-              <style>{`@keyframes offr-pulse { 0%,100%{opacity:0.4} 50%{opacity:0.8} }`}</style>
-            </div>
-          ) : altsErr ? (
-            <div style={{ padding: "14px 18px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "var(--r)" }}>
-              <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{altsErr}</p>
-            </div>
-          ) : alts.length === 0 ? (
-            <div style={{ padding: "32px", textAlign: "center", background: "var(--s1)", border: "1px dashed var(--b)", borderRadius: "var(--r)" }}>
-              <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "16px" }}>
-                No additional matches found for your interests. Try updating your profile or exploring the full catalogue.
-              </p>
-              <Link href="/dashboard/explore" className="btn btn-ghost" style={{ fontSize: "13px" }}>Open Explore →</Link>
-            </div>
           ) : (
             <>
-              <p className="label" style={{ marginBottom: "14px" }}>Based on: {profile.interests.join(", ")}</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
-                {alts.map(({ course, reason }) => (
-                  <div key={course.course_key} style={{
-                    padding: "16px 20px",
-                    background: "var(--s1)",
-                    border: "1px solid var(--b)",
-                    borderRadius: "var(--r)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "16px",
-                  }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: "14px", fontWeight: 500, color: "var(--t)", marginBottom: "3px" }}>{course.course_name}</p>
-                      <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "3px" }}>
-                        {course.universities_count} {course.universities_count === 1 ? "university" : "universities"}
-                        {course.faculties.length > 0 && ` · ${course.faculties[0]}`}
-                      </p>
-                      <p style={{ fontSize: "11px", color: "var(--t3)", opacity: 0.75, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{reason}</p>
-                    </div>
-                    <Link
-                      href={`/dashboard/assess?query=${encodeURIComponent(course.course_name)}`}
-                      style={{
-                        flexShrink: 0,
-                        fontSize: "12px",
-                        padding: "8px 14px",
-                        border: "1px solid var(--b)",
-                        borderRadius: "var(--r)",
-                        color: "var(--t2)",
-                        textDecoration: "none",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Check chances →
-                    </Link>
+              {/* AI portfolio strategy note */}
+              {portfolioStrategy && (
+                <div style={{ padding: "14px 18px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "var(--ri)", marginBottom: "20px", display: "flex", gap: "10px" }}>
+                  <span style={{ color: "var(--acc)", flexShrink: 0, marginTop: "1px" }}>AI</span>
+                  <p style={{ fontSize: "13px", color: "var(--t2)", lineHeight: 1.65 }}>{portfolioStrategy}</p>
+                </div>
+              )}
+
+              <AIBlock
+                status={altsStatus}
+                error={altsErr || undefined}
+                onRetry={loadAlts}
+                skeletonLines={4}
+              >
+                {alts.length === 0 && altsStatus === "ok" ? (
+                  <div style={{ padding: "32px", textAlign: "center", background: "var(--s1)", border: "1px dashed var(--b)", borderRadius: "var(--r)" }}>
+                    <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "16px" }}>
+                      No additional matches found for your interests. Try updating your profile or exploring the full catalogue.
+                    </p>
+                    <Link href="/dashboard/explore" className="btn btn-ghost" style={{ fontSize: "13px" }}>Open Explore →</Link>
                   </div>
-                ))}
-              </div>
-              <Link href="/dashboard/explore" style={{ fontSize: "13px", color: "var(--acc)", textDecoration: "none" }}>
-                See more in Explore →
-              </Link>
+                ) : alts.length > 0 ? (
+                  <>
+                    <p className="label" style={{ marginBottom: "14px" }}>Based on: {profile.interests.join(", ")}</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
+                      {alts.map((course) => (
+                        <div key={course.course_name} style={{
+                          padding: "16px 20px",
+                          background: "var(--s1)",
+                          border: "1px solid var(--b)",
+                          borderRadius: "var(--r)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "16px",
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: "14px", fontWeight: 500, color: "var(--t)", marginBottom: "3px" }}>{course.course_name}</p>
+                            <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "3px" }}>
+                              {course.universities_count} {course.universities_count === 1 ? "university" : "universities"}
+                              {course.faculties.length > 0 && ` · ${course.faculties[0]}`}
+                            </p>
+                            <p style={{ fontSize: "11px", color: "var(--t3)", opacity: 0.75, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {course.tradeoff || course.reason}
+                            </p>
+                          </div>
+                          <Link
+                            href={`/dashboard/assess?query=${encodeURIComponent(course.course_name)}`}
+                            style={{
+                              flexShrink: 0, fontSize: "12px", padding: "8px 14px",
+                              border: "1px solid var(--b)", borderRadius: "var(--r)",
+                              color: "var(--t2)", textDecoration: "none", whiteSpace: "nowrap",
+                            }}
+                          >
+                            Check chances →
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                    <Link href="/dashboard/explore" style={{ fontSize: "13px", color: "var(--acc)", textDecoration: "none" }}>
+                      See more in Explore →
+                    </Link>
+                  </>
+                ) : null}
+              </AIBlock>
             </>
           )}
         </div>

@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { PersonaLinks } from "@/components/dashboard/PersonaLinks";
+import { DashboardInsights } from "@/components/dashboard/DashboardInsights";
+import type { DashboardInsightsRequest } from "@/lib/types";
 
 const BS: Record<string, any> = {
   Safe:   { bg: "var(--safe-bg)", color: "var(--safe-t)", border: "1px solid var(--safe-b)" },
@@ -21,6 +23,24 @@ export default async function DashboardPage() {
 
   const ibTotal = subjects?.filter((s: any) => s.level !== "A_LEVEL").reduce((acc: number, x: any) => acc + Number(x.predicted_grade), 0) || 0;
   const ibScore = ibTotal + (profile.core_points || 0);
+
+  // Build deterministic context for Dashboard AI insights
+  const bands: Record<string, number> = { Safe: 0, Target: 0, Reach: 0 };
+  (assessments || []).forEach((a: any) => { if (a.band in bands) bands[a.band]++; });
+  const insightsRequest: DashboardInsightsRequest = {
+    curriculum: profile.curriculum,
+    year: String(profile.year),
+    interests: profile.interests || [],
+    has_ps: !!(profile.ps_q1 || profile.ps_statement),
+    has_subjects: !!(subjects && subjects.length > 0),
+    assessments_count: assessments?.length || 0,
+    bands,
+    shortlisted_count: shortlisted?.length || 0,
+    ib_score: profile.curriculum === "IB" ? ibScore || null : null,
+    a_level_grades: profile.curriculum !== "IB"
+      ? (subjects || []).slice(0, 4).map((s: any) => s.predicted_grade)
+      : null,
+  };
 
   const h = new Date().getHours();
   const greeting = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
@@ -80,6 +100,9 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* AI insights — deterministic inputs passed from server; AI call happens client-side */}
+      <DashboardInsights request={insightsRequest} />
 
       {/* Persona quick actions */}
       <PersonaLinks items={personaRoutes} />
