@@ -21,7 +21,8 @@ function splitLines(text: string): string[] {
       cur = "";
     }
   });
-  return chunks;
+  // Always return at least one chunk so the backend never receives lines: []
+  return chunks.length > 0 ? chunks : [text.trim()];
 }
 
 // ── Verdict styling map ──────────────────────────────────────
