@@ -86,7 +86,7 @@ export const postResultCounterfactual = (body: import("./types").ResultCounterfa
     body: JSON.stringify(body),
   });
 
-// ── PS analysis ──────────────────────────────────────────────────
+// ── PS analysis (legacy — /api/py/analyse_ps) ────────────────────────
 // ASSUMPTION: endpoint /api/py/analyse_ps accepts { statement, lines, format }
 export const postAnalysePS = (body: {
   statement: string;
@@ -98,6 +98,38 @@ export const postAnalysePS = (body: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+// ── PS Evaluate (new hardened endpoint — /api/py/ps-evaluate) ────────
+/**
+ * Typed client for POST /api/py/ps-evaluate.
+ * Returns the raw response object (PSEvaluateSuccess | PSEvaluateError).
+ * Never throws — caller must check result.status === "ok" | "error".
+ */
+export async function psEvaluate(
+  body: import("./types").PSEvaluateRequest
+): Promise<import("./types").PSEvaluateResponse> {
+  const res = await fetch(`${BASE}/ps-evaluate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  // Always parse JSON — the endpoint returns structured errors on 4xx/5xx too
+  let data: import("./types").PSEvaluateResponse;
+  try {
+    data = await res.json();
+  } catch {
+    // Completely unparseable body (shouldn't happen, but guard anyway)
+    return {
+      status: "error",
+      error_code: "PARSE_ERROR",
+      message: `Server returned an unparseable response (HTTP ${res.status}).`,
+      retryable: true,
+      request_id: "",
+      details: null,
+    };
+  }
+  return data;
+}
 
 // ── Course search ────────────────────────────────────────────────
 export const searchCourses = (query: string) =>

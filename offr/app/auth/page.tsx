@@ -1,6 +1,5 @@
 "use client";
 import { FormEvent, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 export default function AuthPage() {
   const [email, setEmail] = useState("");
@@ -21,24 +20,16 @@ export default function AuthPage() {
 
     setLoading(true);
     try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOtp({
-        email: trimmed,
-        // Magic link PKCE flow: the email template will contain
-        // {{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email
-        // so we don't set emailRedirectTo here.
-        options: {
-          shouldCreateUser: true,
-        },
+      const res = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
       });
+      const data = await res.json();
 
-      if (error) {
-        const msg = error.message || "Something went wrong sending the link.";
-        if (msg.toLowerCase().includes("failed to fetch")) {
-          setErr(
-            "Could not reach Supabase. Please check your connection and try again."
-          );
-        } else if (msg.toLowerCase().includes("rate limit")) {
+      if (!res.ok) {
+        const msg = data?.error || "Something went wrong sending the link.";
+        if (msg.toLowerCase().includes("rate limit")) {
           setErr(
             "You just requested a link. Please wait 60 seconds before requesting another."
           );
@@ -49,14 +40,7 @@ export default function AuthPage() {
         setSent(true);
       }
     } catch (e: any) {
-      const msg = typeof e?.message === "string" ? e.message : "";
-      if (msg.toLowerCase().includes("failed to fetch")) {
-        setErr(
-          "Could not reach Supabase. Please check your connection and try again."
-        );
-      } else {
-        setErr("Something went wrong sending the link.");
-      }
+      setErr(e?.message || "Something went wrong sending the link.");
     } finally {
       setLoading(false);
     }
