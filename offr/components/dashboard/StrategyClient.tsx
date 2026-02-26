@@ -1,7 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import type { Profile, SubjectEntry, TrackerEntry } from "@/lib/types";
+import type { Profile, SubjectEntry, TrackerEntry, UniqueCourse } from "@/lib/types";
+import { getUniqueCourses } from "@/lib/api";
+import { computeHiddenGems } from "@/lib/explore";
 
 const BS: Record<string, any> = {
   Safe:   { bg: "var(--safe-bg)", color: "var(--safe-t)", border: "1px solid var(--safe-b)", bar: "var(--safe-t)" },
@@ -38,6 +40,47 @@ const PS_TIPS = [
 export function StrategyClient({ profile, subjects, assessments }: { profile: Profile; subjects: SubjectEntry[]; assessments: TrackerEntry[] }) {
   const [activeTab, setActiveTab] = useState<"mix" | "ps" | "alternatives">("mix");
   const mix = getMixAdvice(assessments);
+
+  // ── Alternatives state ─────────────────────────────────────────
+  type AltResult = { course: UniqueCourse; reason: string };
+  const [alts, setAlts] = useState<AltResult[]>([]);
+  const [altsLoading, setAltsLoading] = useState(false);
+  const [altsErr, setAltsErr] = useState("");
+
+  // Fetch + score when alternatives tab first opens and there are interests
+  useEffect(() => {
+    if (activeTab !== "alternatives") return;
+    if (!profile.interests?.length) return;
+    if (alts.length > 0 || altsLoading) return; // already loaded
+
+    let cancelled = false;
+    async function loadAlts() {
+      setAltsLoading(true);
+      setAltsErr("");
+      try {
+        const courses = await getUniqueCourses();
+        if (cancelled) return;
+
+        // Exclude courses already in the tracker
+        const trackerNames = new Set(
+          assessments.map((a) => a.course_name?.toLowerCase().trim())
+        );
+        const available = courses.filter(
+          (c) => !trackerNames.has(c.course_name.toLowerCase().trim())
+        );
+
+        const gems = computeHiddenGems(profile.interests ?? [], available, 6);
+        if (!cancelled) setAlts(gems.map((g) => ({ course: g.course, reason: g.reason })));
+      } catch (e: unknown) {
+        if (!cancelled) setAltsErr((e as Error)?.message || "Failed to load alternatives.");
+      } finally {
+        if (!cancelled) setAltsLoading(false);
+      }
+    }
+    loadAlts();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const hl = subjects.filter(s => s.level === "HL");
   const sl = subjects.filter(s => s.level === "SL");
@@ -199,25 +242,84 @@ export function StrategyClient({ profile, subjects, assessments }: { profile: Pr
       {/* Alternatives tab */}
       {activeTab === "alternatives" && (
         <div className="fade-in">
-          <div style={{ marginBottom: "20px" }}>
-            <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65, marginBottom: "20px" }}>
-              Courses that align with your interests and background — including some less obvious paths worth considering.
-            </p>
-          </div>
+          <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65, marginBottom: "20px" }}>
+            Courses that align with your interests — excluding choices you&apos;ve already assessed.
+          </p>
 
-          {profile.interests?.length === 0 ? (
+          {!profile.interests?.length ? (
             <div style={{ padding: "32px", textAlign: "center", background: "var(--s1)", border: "1px dashed var(--b)", borderRadius: "var(--r)" }}>
               <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "16px" }}>Add interests to your profile to see personalised alternatives.</p>
               <Link href="/dashboard/profile" className="btn btn-ghost" style={{ fontSize: "13px" }}>Add interests →</Link>
             </div>
-          ) : (
-            <div>
-              <p className="label" style={{ marginBottom: "14px" }}>Based on: {profile.interests?.join(", ")}</p>
-              <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "16px" }}>
-                See the full explore page for more, including hidden gems you may not have considered.
-              </p>
-              <Link href="/dashboard/explore" className="btn btn-prim" style={{ marginBottom: "16px", display: "inline-flex" }}>Open Explore →</Link>
+          ) : altsLoading ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {[100, 85, 92, 78].map((w, i) => (
+                <div key={i} style={{
+                  height: "72px", borderRadius: "var(--r)",
+                  background: "var(--s2)",
+                  width: `${w}%`,
+                  animation: "offr-pulse 1.5s ease-in-out infinite",
+                  animationDelay: `${i * 0.1}s`,
+                }} />
+              ))}
+              <style>{`@keyframes offr-pulse { 0%,100%{opacity:0.4} 50%{opacity:0.8} }`}</style>
             </div>
+          ) : altsErr ? (
+            <div style={{ padding: "14px 18px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "var(--r)" }}>
+              <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{altsErr}</p>
+            </div>
+          ) : alts.length === 0 ? (
+            <div style={{ padding: "32px", textAlign: "center", background: "var(--s1)", border: "1px dashed var(--b)", borderRadius: "var(--r)" }}>
+              <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "16px" }}>
+                No additional matches found for your interests. Try updating your profile or exploring the full catalogue.
+              </p>
+              <Link href="/dashboard/explore" className="btn btn-ghost" style={{ fontSize: "13px" }}>Open Explore →</Link>
+            </div>
+          ) : (
+            <>
+              <p className="label" style={{ marginBottom: "14px" }}>Based on: {profile.interests.join(", ")}</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "20px" }}>
+                {alts.map(({ course, reason }) => (
+                  <div key={course.course_key} style={{
+                    padding: "16px 20px",
+                    background: "var(--s1)",
+                    border: "1px solid var(--b)",
+                    borderRadius: "var(--r)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: "14px", fontWeight: 500, color: "var(--t)", marginBottom: "3px" }}>{course.course_name}</p>
+                      <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "3px" }}>
+                        {course.universities_count} {course.universities_count === 1 ? "university" : "universities"}
+                        {course.faculties.length > 0 && ` · ${course.faculties[0]}`}
+                      </p>
+                      <p style={{ fontSize: "11px", color: "var(--t3)", opacity: 0.75, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{reason}</p>
+                    </div>
+                    <Link
+                      href={`/dashboard/assess?query=${encodeURIComponent(course.course_name)}`}
+                      style={{
+                        flexShrink: 0,
+                        fontSize: "12px",
+                        padding: "8px 14px",
+                        border: "1px solid var(--b)",
+                        borderRadius: "var(--r)",
+                        color: "var(--t2)",
+                        textDecoration: "none",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Check chances →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+              <Link href="/dashboard/explore" style={{ fontSize: "13px", color: "var(--acc)", textDecoration: "none" }}>
+                See more in Explore →
+              </Link>
+            </>
           )}
         </div>
       )}
