@@ -69,7 +69,7 @@ class AIError:
 # ─────────────────────────────────────────────────────────────
 
 def _model_name() -> str:
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    return os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 
 def _timeout_s() -> float:
@@ -82,12 +82,18 @@ def _timeout_s() -> float:
 def _get_client():
     """Return an initialised Gemini client, or None if unavailable."""
     api_key = os.getenv("GEMINI_API_KEY")
+    logger.info(
+        "[startup] GEMINI_API_KEY set=%s GEMINI_MODEL=%s",
+        bool(api_key),
+        _model_name(),
+    )
     if not api_key:
         return None
     try:
         from google import genai  # type: ignore
         return genai.Client(api_key=api_key)
-    except BaseException:
+    except BaseException as e:
+        logger.error("[startup] failed to initialise Gemini client: %s", repr(e))
         return None
 
 
@@ -255,7 +261,7 @@ def call_gemini_json(
             result = _parse_json_robust(raw_text)
             if result is None:
                 logger.warning(
-                    "[%s] gemini parse_error latency=%dms text_preview=%.80r",
+                    "[%s] gemini parse_error latency=%dms raw_response=%r",
                     tid, latency_ms, raw_text,
                 )
                 return None, AIError(
@@ -274,9 +280,12 @@ def call_gemini_json(
         except BaseException as e:
             latency_ms = int((time.monotonic() - t0) * 1000)
             last_err = _classify_error(e)
+            # Log full error details — status code and body are included in repr(e)
+            # for google.genai exceptions which embed the HTTP response.
             logger.warning(
-                "[%s] gemini %s attempt=%d/%d latency=%dms err=%s",
-                tid, last_err.code, attempt, max_retries, latency_ms, type(e).__name__,
+                "[%s] gemini %s attempt=%d/%d latency=%dms exc_type=%s exc_detail=%r",
+                tid, last_err.code, attempt, max_retries, latency_ms,
+                type(e).__name__, str(e),
             )
             if attempt < max_retries:
                 time.sleep(backoff)

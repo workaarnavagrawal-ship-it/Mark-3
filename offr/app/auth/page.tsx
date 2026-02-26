@@ -40,7 +40,7 @@ export default function AuthPage() {
         setSent(true);
       }
     } catch (e: any) {
-      setErr("Something went wrong sending the link.");
+      setErr(e?.message || "Something went wrong sending the link.");
     } finally {
       setLoading(false);
     }

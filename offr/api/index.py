@@ -634,18 +634,6 @@ def counsellor_rewrite_with_gemini(
     result, _err, _ms = call_gemini_json(
         prompt,
         trace_id=tid,
-        config_extra={
-            "response_json_schema": {
-                "type": "object",
-                "properties": {
-                    "strengths":       {"type": "array", "items": {"type": "string"}},
-                    "risks":           {"type": "array", "items": {"type": "string"}},
-                    "what_to_do_next": {"type": "array", "items": {"type": "string"}},
-                    "notes":           {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["strengths", "risks", "what_to_do_next", "notes"],
-            },
-        },
     )
     return result
 
@@ -872,7 +860,7 @@ def run_ps_analyzer(
         "faculty":      course_row.get("faculty"),
         "format":       ps.format,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "model":        os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "model":        os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
     }
     raw["constraints"] = constraints
     return raw, None

@@ -9,9 +9,17 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = createClient();
+    const origin =
+      req.headers.get("x-forwarded-proto") && req.headers.get("x-forwarded-host")
+        ? `${req.headers.get("x-forwarded-proto")}://${req.headers.get("x-forwarded-host")}`
+        : process.env.NEXT_PUBLIC_SITE_URL ?? new URL(req.url).origin;
+
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { shouldCreateUser: true },
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: `${origin}/auth/callback`,
+      },
     });
 
     if (error) {
