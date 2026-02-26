@@ -1,6 +1,8 @@
 import type {
   CourseDetail,
   CourseListItem,
+  DashboardInsightsRequest,
+  DashboardInsightsResponse,
   OfferAssessRequest,
   OfferAssessResponse,
   UniversityItem,
@@ -36,6 +38,14 @@ export const postOfferAssess = (body: OfferAssessRequest) =>
 // ASSUMPTION: endpoint /api/py/suggest accepts SuggestRequest
 export const postSuggest = (body: import("./types").SuggestRequest) =>
   apiFetch<import("./types").SuggestResponse>("/suggest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── Dashboard AI insights ────────────────────────────────────
+export const postDashboardInsights = (body: DashboardInsightsRequest) =>
+  apiFetch<DashboardInsightsResponse>("/dashboard_insights", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

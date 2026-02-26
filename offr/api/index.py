@@ -1558,3 +1558,150 @@ async def analyse_ps(request: Request):
             status_code=500,
         )
     return JSONResponse(result)
+
+
+# ─────────────────────────────────────────────────────────────
+# Dashboard AI insights — /api/py/dashboard_insights
+# Deterministic inputs in → AI explanation + gap analysis out.
+# Falls back gracefully if Gemini is unavailable.
+# ─────────────────────────────────────────────────────────────
+
+class DashboardInsightsRequest(BaseModel):
+    curriculum: str                        # "IB" | "A_LEVELS"
+    year: str                              # "11" | "12"
+    interests: List[str]
+    has_ps: bool
+    has_subjects: bool
+    assessments_count: int
+    bands: Dict[str, int]                  # {"Safe": 1, "Target": 2, "Reach": 0}
+    shortlisted_count: int
+    ib_score: Optional[int] = None         # IB only; None for A-Level
+    a_level_grades: Optional[List[str]] = None   # A-Level only
+
+
+class DashboardInsightsResponse(BaseModel):
+    status: str = "ok"
+    what_to_do_next: str
+    profile_gaps: List[str]
+    clarity_summary: str
+    portfolio_insight: Optional[str] = None
+
+
+def _dashboard_insights_fallback(req: DashboardInsightsRequest) -> Dict[str, Any]:
+    """Rule-based fallback when Gemini is unavailable."""
+    gaps: List[str] = []
+    if not req.has_subjects:
+        gaps.append("Add your predicted grades so assessments can be calculated accurately.")
+    if not req.has_ps:
+        gaps.append("Write your personal statement — it affects PS fit scoring in assessments.")
+    if req.assessments_count == 0:
+        gaps.append("Run your first offer assessment to see where you stand.")
+    if req.shortlisted_count == 0:
+        gaps.append("Shortlist at least one course on the Explore page.")
+
+    # What to do next: most urgent gap, or portfolio insight
+    if not req.has_subjects:
+        next_action = "Add your predicted grades in Profile so assessments work correctly."
+    elif not req.has_ps:
+        next_action = "Draft your personal statement in Profile — it significantly affects your PS fit score."
+    elif req.assessments_count == 0:
+        next_action = "Run an assessment on a course you are considering to see your realistic chances."
+    elif req.shortlisted_count == 0:
+        next_action = "Explore courses and shortlist the ones that interest you most."
+    else:
+        total = req.assessments_count
+        reaches = req.bands.get("Reach", 0)
+        if total > 0 and reaches / total > 0.6:
+            next_action = "Your portfolio is heavy on Reach choices. Consider adding some safer options."
+        else:
+            next_action = "Your application is taking shape. Review your tracker and finalise your five UCAS choices."
+
+    portfolio_insight = None
+    if req.assessments_count > 0:
+        safe = req.bands.get("Safe", 0)
+        target = req.bands.get("Target", 0)
+        reach = req.bands.get("Reach", 0)
+        portfolio_insight = f"{safe} Safe, {target} Target, {reach} Reach across {req.assessments_count} assessed choice(s)."
+
+    score_str = ""
+    if req.curriculum == "IB" and req.ib_score:
+        score_str = f" with a predicted IB score of {req.ib_score}/45"
+
+    clarity = f"You are a Year {req.year} {req.curriculum.replace('_', '-')} student{score_str} interested in {', '.join(req.interests) if req.interests else 'exploring options'}."
+
+    return {
+        "status": "ok",
+        "what_to_do_next": next_action,
+        "profile_gaps": gaps,
+        "clarity_summary": clarity,
+        "portfolio_insight": portfolio_insight,
+    }
+
+
+@app.post("/api/py/dashboard_insights")
+async def dashboard_insights(payload: DashboardInsightsRequest):
+    """
+    Returns AI-generated dashboard insights: next action, profile gaps,
+    a one-sentence clarity summary, and portfolio commentary.
+
+    Uses Gemini when available; falls back to rule-based output silently.
+    """
+    tid = uuid.uuid4().hex[:8]
+
+    if not is_gemini_available():
+        return _dashboard_insights_fallback(payload)
+
+    bands_str = ", ".join(f"{k}: {v}" for k, v in payload.bands.items() if v > 0) or "none yet"
+    score_line = ""
+    if payload.curriculum == "IB" and payload.ib_score is not None:
+        score_line = f"Predicted IB score: {payload.ib_score}/45"
+    elif payload.a_level_grades:
+        score_line = f"Predicted A-Level grades: {', '.join(payload.a_level_grades[:4])}"
+
+    prompt = f"""You are a supportive UK UCAS admissions advisor helping a student understand where they stand and what to do next.
+
+Student profile:
+- Curriculum: {payload.curriculum.replace("_", "-")}
+- Year: {payload.year}
+- Interests: {", ".join(payload.interests) if payload.interests else "not specified"}
+- {score_line}
+- Has predicted grades entered: {payload.has_subjects}
+- Has personal statement: {payload.has_ps}
+- Courses assessed: {payload.assessments_count}
+- Assessment bands: {bands_str}
+- Courses shortlisted: {payload.shortlisted_count}
+
+Your task: return ONLY valid JSON (no markdown, no fences) with this exact structure:
+{{
+  "what_to_do_next": "<single most important action, 1–2 sentences, specific and encouraging>",
+  "profile_gaps": ["<gap 1>", "<gap 2>"],
+  "clarity_summary": "<one sentence honest summary of current position>",
+  "portfolio_insight": "<one sentence on band mix if assessments > 0, else null>"
+}}
+
+Rules:
+- profile_gaps should list 1–3 concrete missing or weak items (empty array [] if profile looks complete)
+- what_to_do_next should be the single highest-priority next step
+- clarity_summary should be factual and grounding, not cheerleading
+- portfolio_insight is null if no assessments exist
+- Never invent scores or outcomes
+- Keep all text concise (≤ 30 words each)"""
+
+    result, err, latency_ms = call_gemini_json(prompt, trace_id=tid)
+
+    if err or result is None:
+        # Graceful fallback — never let this endpoint crash the dashboard
+        fallback = _dashboard_insights_fallback(payload)
+        fallback["_fallback"] = True
+        return fallback
+
+    # Merge status field and ensure required keys exist
+    fallback = _dashboard_insights_fallback(payload)
+    return {
+        "status": "ok",
+        "what_to_do_next": result.get("what_to_do_next") or fallback["what_to_do_next"],
+        "profile_gaps": result.get("profile_gaps") or fallback["profile_gaps"],
+        "clarity_summary": result.get("clarity_summary") or fallback["clarity_summary"],
+        "portfolio_insight": result.get("portfolio_insight") or fallback["portfolio_insight"],
+        "provider_meta": {"latency_ms": latency_ms},
+    }

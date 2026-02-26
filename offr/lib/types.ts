@@ -228,6 +228,33 @@ export interface PSAnalysisResponse {
   lineFeedback: PSLineFeedback[];
 }
 
+// ── Dashboard AI insights ──────────────────────────────────────────
+export interface DashboardInsightsRequest {
+  curriculum: string;
+  year: string;
+  interests: string[];
+  has_ps: boolean;
+  has_subjects: boolean;
+  assessments_count: number;
+  bands: Record<string, number>;
+  shortlisted_count: number;
+  ib_score?: number | null;
+  a_level_grades?: string[] | null;
+}
+
+export interface DashboardInsightsResponse {
+  status: "ok" | "error";
+  what_to_do_next: string;
+  profile_gaps: string[];
+  clarity_summary: string;
+  portfolio_insight: string | null;
+  provider_meta?: { latency_ms: number };
+  // error fields (when status === "error")
+  error_code?: string;
+  message?: string;
+  retryable?: boolean;
+}
+
 // ── Explore: Hidden gems & shortlist ────────────────────────────────
 
 export interface HiddenGemRecommendation {
