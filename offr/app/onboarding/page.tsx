@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { upsertProfile, upsertSubjects } from "@/lib/profile";
 import { savePersona } from "@/lib/persona";
+import { ExtracurricularPicker } from "@/components/ui/ExtracurricularPicker";
 import type { Curriculum, HomeOrIntl, Persona, SubjectEntry, YearGroup } from "@/lib/types";
 
 const INTERESTS = ["Economics","Law","Computer Science","Medicine","Engineering","Mathematics","History","Philosophy","Politics","Psychology","Business","Architecture","Biology","Chemistry","Physics","Literature","Art & Design","Music","Geography","Sociology","Environmental Science"];
@@ -24,6 +25,8 @@ export default function OnboardingPage() {
   const [homeOrIntl, setHomeOrIntl] = useState<HomeOrIntl>("intl");
   const [corePoints, setCorePoints] = useState(2);
   const [interests, setInterests] = useState<string[]>([]);
+  const [interestsText, setInterestsText] = useState("");
+  const [extracurriculars, setExtracurriculars] = useState<string[]>([]);
   const [hl, setHl] = useState<SubjectEntry[]>([
     { subject: "Math AA HL", level: "HL", predicted_grade: "6" },
     { subject: "Economics", level: "HL", predicted_grade: "6" },
@@ -52,16 +55,22 @@ export default function OnboardingPage() {
     try {
       savePersona(persona);
       const subjects = curriculum === "IB" ? [...hl, ...sl] : al;
-      const profile = await upsertProfile({ name, year, curriculum, home_or_intl: homeOrIntl, interests, core_points: curriculum === "IB" ? corePoints : undefined, ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement });
+      const profile = await upsertProfile({
+        name, year, curriculum, home_or_intl: homeOrIntl, interests,
+        core_points: curriculum === "IB" ? corePoints : undefined,
+        ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement,
+        interests_text: interestsText.trim() || undefined,
+        extracurriculars,
+      });
       if (!profile) throw new Error("Failed to save");
       await upsertSubjects(profile.id, subjects);
       const dest = persona === "explorer" ? "/dashboard/explore" : persona === "optimizer" ? "/dashboard/strategy" : "/dashboard/assess";
       router.push(dest);
-    } catch (e: any) { setErr(e.message); }
+    } catch (e: any) { setErr(e?.message || "An unexpected error occurred. Please try again."); }
     finally { setSaving(false); }
   }
 
-  const TOTAL = 6;
+  const TOTAL = 7;
   const progress = (step / TOTAL) * 100;
 
   const s: React.CSSProperties = { background: "var(--s2)", border: "1px solid var(--b)", borderRadius: "var(--ri)", padding: "11px 14px", fontSize: "14px", color: "var(--t)", fontFamily: "var(--font-dm, var(--sans))", outline: "none", width: "100%", transition: "border-color 150ms" };
@@ -80,7 +89,7 @@ export default function OnboardingPage() {
           <div style={{ height: "100%", background: "var(--acc)", borderRadius: "2px", width: `${progress}%`, transition: "width 400ms ease" }} />
         </div>
 
-        {/* Step 0 — persona */}
+        {/* Step 1 — persona */}
         {step === 1 && (
           <div className="fade-in">
             <p className="label">Step 1 of {TOTAL}</p>
@@ -105,7 +114,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 1 — name */}
+        {/* Step 2 — name */}
         {step === 2 && (
           <div className="fade-in">
             <p className="label">Step 2 of {TOTAL}</p>
@@ -115,7 +124,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 2 — situation */}
+        {/* Step 3 — situation */}
         {step === 3 && (
           <div className="fade-in">
             <p className="label">Step 3 of {TOTAL}</p>
@@ -153,12 +162,12 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 3 — interests */}
+        {/* Step 4 — interests + free text */}
         {step === 4 && (
           <div className="fade-in">
             <p className="label">Step 4 of {TOTAL}</p>
             <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>Interests</h1>
-            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Pick up to 3. Used to personalise your explore page.</p>
+            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Pick up to 3 subject areas to personalise your explore page.</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
               {INTERESTS.map(i => {
                 const active = interests.includes(i);
@@ -178,13 +187,45 @@ export default function OnboardingPage() {
                 );
               })}
             </div>
+
+            {/* Free-text context */}
+            <div style={{ marginTop: "28px" }}>
+              <p className="label">Tell us more — optional</p>
+              <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "10px", lineHeight: 1.6 }}>
+                What topics or ideas genuinely excite you? In your own words.
+              </p>
+              <textarea
+                value={interestsText}
+                onChange={e => setInterestsText(e.target.value)}
+                style={{ ...s, minHeight: "88px", resize: "none" }}
+                placeholder='e.g. "I love debating ethics and political theory. Recently got interested in behavioural economics and how psychology shapes markets…"'
+              />
+              <p style={{ fontSize: "11px", color: "var(--t3)", marginTop: "6px", opacity: 0.7 }}>
+                The more context you share, the better your course recommendations and PS feedback become.
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Step 4 — grades */}
+        {/* Step 5 — extracurriculars (new) */}
         {step === 5 && (
           <div className="fade-in">
             <p className="label">Step 5 of {TOTAL}</p>
+            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>What do you get up to?</h1>
+            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>
+              Select your extracurriculars — helps us tailor course suggestions and PS tips.
+            </p>
+            <ExtracurricularPicker value={extracurriculars} onChange={setExtracurriculars} variant="onboarding" />
+            <p style={{ fontSize: "12px", color: "var(--t3)", marginTop: "14px", opacity: 0.7 }}>
+              Not sure yet? Skip — you can update this any time in your profile.
+            </p>
+          </div>
+        )}
+
+        {/* Step 6 — grades (was step 5) */}
+        {step === 6 && (
+          <div className="fade-in">
+            <p className="label">Step 6 of {TOTAL}</p>
             <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>Predicted grades</h1>
             <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px" }}>These pre-fill every assessment automatically.</p>
             {curriculum === "IB" ? (
@@ -222,10 +263,10 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 5 — PS */}
-        {step === 6 && (
+        {/* Step 7 — PS (was step 6) */}
+        {step === 7 && (
           <div className="fade-in">
-            <p className="label">Step 6 of {TOTAL}</p>
+            <p className="label">Step 7 of {TOTAL}</p>
             <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>Personal statement</h1>
             <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Optional — improves prediction accuracy. You can add this later.</p>
             <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>

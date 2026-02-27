@@ -39,6 +39,8 @@ export interface Profile {
   ps_format?: "UCAS_3Q" | "LEGACY";
   ps_statement?: string;
   ps_last_analysis?: PSAnalysisResponse;
+  interests_text?: string;       // free-text "what I like" captured in onboarding
+  extracurriculars?: string[];   // curated + custom multi-select
   created_at?: string;
   updated_at?: string;
 }
