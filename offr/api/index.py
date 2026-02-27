@@ -2509,6 +2509,8 @@ class PSEvaluateRequest(BaseModel):
     )
     grades_summary: Optional[str] = None
     mode: str = Field(default="standalone", pattern="^(standalone|assessment)$")
+    interests_text: Optional[str] = None
+    extracurriculars: Optional[List[str]] = None
 
 
 # ── Response sub-models ───────────────────────────────────────
@@ -2604,15 +2606,32 @@ def _build_ps_evaluate_prompt(
     target_university: Optional[str],
     curriculum: Optional[str],
     grades_summary: Optional[str],
+    interests_text: Optional[str] = None,
+    extracurriculars: Optional[List[str]] = None,
 ) -> str:
     uni_line        = f"Target university: {target_university}" if target_university else "Target university: not specified"
     curriculum_line = f"Curriculum: {curriculum}" if curriculum else ""
     grades_line     = (f"Grades summary (context only — do not over-weight): {grades_summary}" if grades_summary else "")
-    context_lines   = "\n".join(l for l in [uni_line, curriculum_line, grades_line] if l)
+    extras_line     = (
+        "Student extracurriculars: " + ", ".join(extracurriculars[:10])
+        if extracurriculars else ""
+    )
+    interests_line  = (
+        f"Student interests (own words): {interests_text[:400]}"
+        if interests_text else ""
+    )
+    context_lines   = "\n".join(l for l in [uni_line, curriculum_line, grades_line, extras_line, interests_line] if l)
     grade_note_instruction = (
         f'  "grade_compliment_note": "<one calm sentence on whether the PS is broadly consistent with: {grades_summary}>"'
         if grades_summary
         else '  "grade_compliment_note": null'
+    )
+    student_ctx_note = (
+        "- Use the student context (extracurriculars, interests) only to sharpen "
+        "top_improvements and line_level_fixes — e.g. suggest including an activity or "
+        "interest the student has but hasn't mentioned. Do NOT let it inflate rubric scores."
+        if (extracurriculars or interests_text) else
+        "- Evaluate the PS on its own merits."
     )
 
     return f"""You are a calm, experienced UK university admissions reviewer.
@@ -2628,7 +2647,7 @@ Personal statement:
 
 Instructions:
 - Evaluate ONLY in terms of the target course: {target_course}.
-- Do NOT comment on extracurricular alignment or personal interests beyond what the PS shows.
+- {student_ctx_note}
 - Be specific, honest, calm. No hype. No guarantees. No fake certainty.
 - Output ONLY valid JSON. No markdown, no code fences, no preamble.
 
@@ -2879,6 +2898,8 @@ async def ps_evaluate(request: Request):
         payload.target_university,
         payload.curriculum,
         payload.grades_summary,
+        payload.interests_text,
+        payload.extracurriculars,
     )
 
     ai_result, ai_err, latency_ms = call_gemini_json(

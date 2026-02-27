@@ -289,6 +289,8 @@ export interface PSEvaluateRequest {
   curriculum?: "IB" | "A_LEVELS" | null;
   grades_summary?: string | null;
   mode?: "standalone" | "assessment";
+  interests_text?: string | null;
+  extracurriculars?: string[] | null;
 }
 
 export interface PSRubricDimension {

@@ -112,6 +112,8 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
       curriculum: (profile.curriculum as "IB" | "A_LEVELS") || null,
       grades_summary: null,
       mode: "standalone",
+      interests_text: profile.interests_text ?? null,
+      extracurriculars: profile.extracurriculars ?? null,
     });
 
     setLoading(false);
