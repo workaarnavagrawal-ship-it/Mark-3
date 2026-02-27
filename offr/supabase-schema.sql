@@ -73,3 +73,8 @@ create policy "Users own their shortlisted courses" on shortlisted_courses for a
 
 -- v2: persist latest PS analysis result on the profile row
 alter table profiles add column if not exists ps_last_analysis jsonb;
+
+-- v3: richer student context for personalised course discovery + PS suggestions
+-- Run these once in Supabase SQL editor, then they are safe to re-run (idempotent).
+alter table profiles add column if not exists interests_text text;
+alter table profiles add column if not exists extracurriculars text[] default '{}';

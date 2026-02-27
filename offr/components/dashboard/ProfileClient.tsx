@@ -48,13 +48,13 @@ export function ProfileClient({ profile, subjects }: { profile: Profile; subject
   async function save() {
     setErr(""); setSaving(true); setSaved(false);
     try {
-      const p = await upsertProfile({ name, year, home_or_intl: homeOrIntl, interests, core_points: corePoints, ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement });
+      const p = await upsertProfile({ name, year, curriculum: profile.curriculum, home_or_intl: homeOrIntl, interests, core_points: corePoints, ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement });
       if (!p) throw new Error("Save failed");
       const subs = profile.curriculum === "IB" ? [...hl,...sl] : al;
       await upsertSubjects(p.id, subs);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (e: any) { setErr(e.message); }
+    } catch (e: any) { setErr(e?.message || "An unexpected error occurred. Please try again."); }
     finally { setSaving(false); }
   }
 
