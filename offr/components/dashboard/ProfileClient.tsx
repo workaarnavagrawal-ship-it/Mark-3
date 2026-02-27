@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { upsertProfile, upsertSubjects } from "@/lib/profile";
 import { ProfileSuggestionsPanel } from "./ProfileSuggestionsPanel";
+import { ExtracurricularPicker } from "@/components/ui/ExtracurricularPicker";
 import type { Profile, SubjectEntry } from "@/lib/types";
 
 const INTERESTS = ["Economics","Law","Computer Science","Medicine","Engineering","Mathematics","History","Philosophy","Politics","Psychology","Business","Architecture","Biology","Chemistry","Physics","Literature","Art & Design","Music","Geography","Sociology","Education","Environmental Science"];
@@ -27,6 +28,8 @@ export function ProfileClient({ profile, subjects }: { profile: Profile; subject
   const [year, setYear] = useState(profile.year);
   const [homeOrIntl, setHomeOrIntl] = useState(profile.home_or_intl);
   const [interests, setInterests] = useState<string[]>(profile.interests || []);
+  const [interestsText, setInterestsText] = useState(profile.interests_text || "");
+  const [extracurriculars, setExtracurriculars] = useState<string[]>(profile.extracurriculars || []);
   const [corePoints, setCorePoints] = useState(profile.core_points || 2);
   const [psFormat, setPsFormat] = useState<"UCAS_3Q"|"LEGACY">(profile.ps_format || "UCAS_3Q");
   const [q1, setQ1] = useState(profile.ps_q1 || "");
@@ -48,7 +51,13 @@ export function ProfileClient({ profile, subjects }: { profile: Profile; subject
   async function save() {
     setErr(""); setSaving(true); setSaved(false);
     try {
-      const p = await upsertProfile({ name, year, curriculum: profile.curriculum, home_or_intl: homeOrIntl, interests, core_points: corePoints, ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement });
+      const p = await upsertProfile({
+        name, year, curriculum: profile.curriculum, home_or_intl: homeOrIntl,
+        interests, core_points: corePoints,
+        ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement,
+        interests_text: interestsText.trim() || undefined,
+        extracurriculars,
+      });
       if (!p) throw new Error("Save failed");
       const subs = profile.curriculum === "IB" ? [...hl,...sl] : al;
       await upsertSubjects(p.id, subs);
@@ -96,13 +105,33 @@ export function ProfileClient({ profile, subjects }: { profile: Profile; subject
       </Section>
 
       <Section title="Interests (up to 3)">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginBottom: "20px" }}>
           {INTERESTS.map(i => {
             const active = interests.includes(i);
             const maxed = interests.length >= 3 && !active;
             return <button key={i} onClick={() => toggleInterest(i)} disabled={maxed} style={{ padding: "6px 14px", borderRadius: "9999px", border: `1px solid ${active ? "var(--acc)" : "var(--b)"}`, background: active ? "var(--acc)" : "transparent", color: active ? "var(--t-inv)" : "var(--t3)", fontSize: "12px", cursor: maxed ? "not-allowed" : "pointer", opacity: maxed ? 0.35 : 1, transition: "all 150ms", fontFamily: "var(--font-dm, var(--sans))" }}>{i}</button>;
           })}
         </div>
+        <div>
+          <p className="label">Tell us more — optional</p>
+          <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "8px", lineHeight: 1.6 }}>
+            What topics or ideas genuinely excite you? Used to improve course suggestions and PS feedback.
+          </p>
+          <textarea
+            value={interestsText}
+            onChange={e => setInterestsText(e.target.value)}
+            className="inp"
+            style={{ minHeight: "80px", resize: "none" }}
+            placeholder='e.g. "I love debating ethics and political theory. Recently got interested in behavioural economics…"'
+          />
+        </div>
+      </Section>
+
+      <Section title="Extracurriculars">
+        <p style={{ fontSize: "12px", color: "var(--t3)", marginBottom: "14px", lineHeight: 1.6 }}>
+          Helps tailor course suggestions and PS tips. Add your own if needed.
+        </p>
+        <ExtracurricularPicker value={extracurriculars} onChange={setExtracurriculars} variant="profile" />
       </Section>
 
       <Section title={profile.curriculum === "IB" ? "IB subjects & predicted grades" : "A-Level predicted grades"}>
