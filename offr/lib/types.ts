@@ -404,6 +404,175 @@ export interface LabelSuggestionsResponse {
   provider_meta?: { latency_ms: number };
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// New Monologue data types (Phase 1 contracts)
+// ─────────────────────────────────────────────────────────────────────
+
+/** Full course offering — one CSV row, cleaned. */
+export interface Offering {
+  course_id: string;
+  university_id: string;
+  university_name: string;
+  faculty: string;
+  course_name: string;
+  degree_type: string;
+  course_url: string;
+  curriculum_supported: string;
+  typical_offer: string;
+  min_requirements: string;
+  min_points_home: number | null;
+  intl_buffer_points: number | null;
+  required_subjects: string;
+  recommended_subjects: string;
+  ps_expected_signals: string;
+  estimated_annual_cost_international: number | null;
+  notes: string;
+}
+
+/** Light version returned by list endpoints. */
+export interface OfferingLight {
+  course_id: string;
+  university_id: string;
+  university_name: string;
+  faculty: string;
+  course_name: string;
+  degree_type: string;
+  typical_offer: string;
+  min_points_home: number | null;
+  estimated_annual_cost_international: number | null;
+  course_url: string;
+}
+
+/** University with offering count. */
+export interface UniversityEntry {
+  uni_code: string;
+  uni_name: string;
+  university_id: string;       // backward compat
+  university_name: string;     // backward compat
+  offering_count: number;
+}
+
+/** Deduped course group (one per logical course across all unis). */
+export interface CourseGroup {
+  course_group_key: string;
+  course_group_name: string;
+  offerings_count: number;
+  offerings_preview: string[];  // up to 3 uni names
+  representative_faculty: string;
+}
+
+/** Full course group detail with all offerings. */
+export interface CourseGroupDetail {
+  group: CourseGroup;
+  offerings: Offering[];
+}
+
+/** CSV data quality report. */
+export interface DataQualityReport {
+  total_rows_in_file: number;
+  rows_loaded: number;
+  fixed_case_c: number;
+  fixed_case_a: number;
+  fixed_case_b: number;
+  dropped: number;
+  dropped_course_ids: string[];
+  fix_details: { course_id: string; fix_type: string; original_course_name: string; fixed_course_name: string }[];
+}
+
+// ── Recommend (Explorer Clarity Session) ──────────────────────────────
+
+export interface RecommendRequest {
+  curriculum: "IB" | "A_LEVELS";
+  home_or_intl?: "HOME" | "INTL";
+  ib_total_points?: number | null;
+  alevel_predicted_summary?: string | null;
+  optimize_for?: "PRESTIGE" | "BUDGET" | "BALANCE";
+  vibe_tags?: string[];
+  location_tags?: string[];
+  interest_tags?: string[];
+  free_text?: string | null;
+  top_n?: number;
+  exclude_course_ids?: string[];
+}
+
+export interface RecommendedOffering extends OfferingLight {
+  fit_score: number;
+  reasons: string[];
+  required_subjects: string;
+  ps_expected_signals: string;
+  notes: string;
+  ai_note: string | null;
+}
+
+export interface RecommendResponse {
+  status: "ok" | "error";
+  recommendations: RecommendedOffering[];
+  total_pool: number;
+  ai_enhanced: boolean;
+}
+
+// ── Assess (extended contract) ─────────────────────────────────────────
+
+export interface AssessResult {
+  band: "Safe" | "Target" | "Reach";
+  chance: number;
+  fit_score: number;
+  grade_match: number;
+  subject_match: number | null;
+  ps_impact: number | null;
+  reasoning: {
+    bullets: string[];
+    grade_note: string | null;
+    subject_note: string | null;
+  };
+}
+
+// ── Persona ────────────────────────────────────────────────────────────
+export type PersonaCode = "EXPLORER" | "STRATEGIST" | "FINISHER";
+
+// ── Profile (new, extended shape) ─────────────────────────────────────
+export interface ProfileNew {
+  user_id: string;
+  name: string;
+  persona: PersonaCode;
+  curriculum: "IB" | "ALEVEL";
+  home_or_intl: "HOME" | "INTL";
+  predicted_summary: string | null;
+  ib_subject_total: number | null;
+  ib_bonus_points: number | null;
+  ib_total_points: number | null;
+  alevel_predicted: Record<string, string> | null;
+  interest_tags: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ── Strategy choice ────────────────────────────────────────────────────
+export interface StrategyChoice {
+  id?: string;
+  user_id: string;
+  slot: 1 | 2 | 3 | 4 | 5;
+  course_id: string;
+  university_name: string;
+  course_name: string;
+  notes?: string | null;
+}
+
+// ── Shortlist item (new shape) ─────────────────────────────────────────
+export interface ShortlistItem {
+  id?: string;
+  user_id: string;
+  item_type: "COURSE_GROUP" | "OFFERING";
+  course_group_key?: string | null;
+  course_id?: string | null;
+  course_name: string;
+  university_name?: string | null;
+  reason?: string | null;
+  fit_score?: number | null;
+  created_at?: string;
+}
+
+// ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ── ──
 // ── Explore: Hidden gems & shortlist ────────────────────────────────
 
 export interface HiddenGemRecommendation {

@@ -150,6 +150,57 @@ export async function getUniqueCourseDetail(course_key: string): Promise<UniqueC
   return detail;
 }
 
+// ── New Monologue endpoints (Phase 1) ────────────────────────────
+
+/** GET /api/py/universities — with offering_count */
+export const getUniversitiesV2 = () =>
+  apiFetch<import("./types").UniversityEntry[]>("/universities");
+
+/** GET /api/py/offerings?uni_code=&query= */
+export const getOfferings = (params?: { uni_code?: string; query?: string }) => {
+  const sp = new URLSearchParams();
+  if (params?.uni_code) sp.set("uni_code", params.uni_code);
+  if (params?.query) sp.set("query", params.query);
+  const qs = sp.toString();
+  return apiFetch<import("./types").OfferingLight[]>(`/offerings${qs ? `?${qs}` : ""}`);
+};
+
+/** GET /api/py/offerings/{course_id} */
+export const getOfferingDetail = (course_id: string) =>
+  apiFetch<import("./types").Offering>(`/offerings/${encodeURIComponent(course_id)}`);
+
+/** GET /api/py/course-groups?query= */
+export const getCourseGroups = (query?: string) =>
+  apiFetch<import("./types").CourseGroup[]>(
+    `/course-groups${query ? `?query=${encodeURIComponent(query)}` : ""}`
+  );
+
+const _cgDetailCache = new Map<string, import("./types").CourseGroupDetail>();
+
+/** GET /api/py/course-groups/{key} — session-cached */
+export async function getCourseGroupDetail(
+  key: string
+): Promise<import("./types").CourseGroupDetail> {
+  if (_cgDetailCache.has(key)) return _cgDetailCache.get(key)!;
+  const d = await apiFetch<import("./types").CourseGroupDetail>(
+    `/course-groups/${encodeURIComponent(key)}`
+  );
+  _cgDetailCache.set(key, d);
+  return d;
+}
+
+/** POST /api/py/recommend */
+export const postRecommend = (body: import("./types").RecommendRequest) =>
+  apiFetch<import("./types").RecommendResponse>("/recommend", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+/** GET /api/py/data-quality */
+export const getDataQuality = () =>
+  apiFetch<import("./types").DataQualityReport>("/data-quality");
+
 // ── Shortlist (Next.js API, Supabase-backed) ─────────────────────
 
 async function shortlistFetch<T>(path: string, init?: RequestInit): Promise<T> {

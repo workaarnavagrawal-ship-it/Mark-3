@@ -20,6 +20,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.ai_service import AIError, call_gemini_json, is_gemini_available
+from api.csv_loader import (
+    load_offerings,
+    build_course_groups,
+    get_offering as _get_offering_clean,
+    get_offerings_for_group,
+    data_quality_report as _csv_quality_report,
+    UNIVERSITY_NAME_MAP as _UNI_MAP,
+    _course_group_key,
+)
 
 app = FastAPI(
     title="offr API",
@@ -1300,187 +1309,13 @@ def health():
         return {"status": "error", "detail": str(e)}
 
 
-@app.get("/api/py/universities")
-def universities():
-    df = load_df()
-    ids = sorted({clean_str(x) for x in df["university_id"].fillna("").tolist() if clean_str(x)})
-    return [
-        {"university_id": uid, "university_name": UNIVERSITY_NAME_MAP.get(uid, uid)}
-        for uid in ids
-    ]
+# universities() moved to bottom of file as universities_v2() with offering_count
 
 
-@app.get("/api/py/courses")
-def courses(university_id: Optional[str] = None, query: Optional[str] = None):
-    # FIX: original had no ?query= param — search page couldn't use it
-    df = load_df()
-    wanted = [
-        "university_id", "course_id", "course_name", "faculty",
-        "degree_type", "estimated_annual_cost_international", "min_requirements",
-    ]
-    cols = [c for c in wanted if c in df.columns]
-    out  = df[cols].copy()
-
-    if university_id:
-        out = out[out["university_id"].astype(str).str.upper() == university_id.upper()]
-    if query:
-        q    = query.lower()
-        name = out["course_name"].astype(str).str.lower().str.contains(q, na=False)
-        fac  = out["faculty"].astype(str).str.lower().str.contains(q, na=False) if "faculty" in out.columns else pd.Series(False, index=out.index)
-        out  = out[name | fac]
-
-    out = out.where(pd.notna(out), None)
-    if "estimated_annual_cost_international" in out.columns:
-        out["estimated_annual_cost_international"] = out["estimated_annual_cost_international"].map(to_money)
-    return out.to_dict(orient="records")
+# /api/py/courses and /api/py/course/{course_id} are now aliases in the new routes block below
 
 
-@app.get("/api/py/course/{course_id}")
-def course(course_id: str):
-    return get_row(course_id)
-
-
-@app.get("/api/py/unique_courses")
-def unique_courses(q: Optional[str] = None):
-    """
-    Aggregated, de-duplicated list of courses across all universities.
-    Each logical course appears once, with supporting metadata.
-    """
-    df = load_df()
-    if "course_name" not in df.columns or "university_id" not in df.columns:
-        raise HTTPException(status_code=500, detail="course_name/university_id missing from data")
-
-    view = df[["course_name", "university_id", "faculty", "degree_type", "min_requirements"]].copy()
-    if q:
-        ql = q.lower()
-        name_mask = view["course_name"].astype(str).str.lower().str.contains(ql, na=False)
-        fac_mask = view["faculty"].astype(str).str.lower().str.contains(ql, na=False)
-        view = view[name_mask | fac_mask]
-
-    records: Dict[str, Dict[str, Any]] = {}
-    for _, row in view.iterrows():
-        name = clean_str(row.get("course_name"))
-        if not name:
-            continue
-        key = normalize_course_key(name)
-        uni_id = clean_str(row.get("university_id"))
-        fac = clean_str(row.get("faculty"))
-        deg = clean_str(row.get("degree_type"))
-        min_req = clean_str(row.get("min_requirements"))
-
-        if key not in records:
-            records[key] = {
-                "course_key": key,
-                "course_name": name,
-                "universities": [],
-                "faculties": set(),
-                "degree_types": set(),
-                "min_entry_examples": [],
-            }
-
-        rec = records[key]
-        if uni_id:
-            uni_name = UNIVERSITY_NAME_MAP.get(uni_id, uni_id)
-            if not any(u["university_id"] == uni_id for u in rec["universities"]):
-                rec["universities"].append({"university_id": uni_id, "university_name": uni_name})
-        if fac:
-            rec["faculties"].add(fac)
-        if deg:
-            rec["degree_types"].add(deg)
-        if min_req:
-            if len(rec["min_entry_examples"]) < 3 and min_req not in rec["min_entry_examples"]:
-                rec["min_entry_examples"].append(min_req)
-
-    out: List[Dict[str, Any]] = []
-    for key, rec in records.items():
-        faculties = sorted(rec["faculties"])
-        degree_types = sorted(rec["degree_types"])
-        min_entry_hint = None
-        if rec["min_entry_examples"]:
-            # Just show one short string as a hint; keep it honest and simple.
-            min_entry_hint = rec["min_entry_examples"][0]
-        out.append(
-            {
-                "course_key": rec["course_key"],
-                "course_name": rec["course_name"],
-                "universities_count": len(rec["universities"]),
-                "universities": rec["universities"],
-                "faculties": faculties,
-                "degree_types": degree_types,
-                "min_entry_hint": min_entry_hint,
-            }
-        )
-
-    # Sort by course_name for a calm, predictable list.
-    out.sort(key=lambda x: x["course_name"])
-    return out
-
-
-@app.get("/api/py/unique_courses/{course_key}")
-def unique_course_detail(course_key: str):
-    """
-    Detailed view of a logical course, with per-university offerings.
-    """
-    df = load_df()
-    if "course_name" not in df.columns or "course_id" not in df.columns or "university_id" not in df.columns:
-        raise HTTPException(status_code=500, detail="course_name/course_id/university_id missing from data")
-
-    mask = df["course_name"].astype(str).apply(lambda n: normalize_course_key(n) == course_key)
-    subset = df[mask]
-    if subset.empty:
-        raise HTTPException(status_code=404, detail=f"course_key not found: {course_key}")
-
-    # Build aggregated course meta from the subset
-    sample_name = clean_str(subset.iloc[0].get("course_name"))
-    faculties = sorted({clean_str(x) for x in subset.get("faculty", "").tolist() if clean_str(x)})
-    degree_types = sorted({clean_str(x) for x in subset.get("degree_type", "").tolist() if clean_str(x)})
-
-    universities: List[Dict[str, Any]] = []
-    seen_unis: set = set()
-    min_examples: List[str] = []
-
-    offerings: List[Dict[str, Any]] = []
-    for _, row in subset.iterrows():
-        course_id = clean_str(row.get("course_id"))
-        uni_id = clean_str(row.get("university_id"))
-        if not course_id or not uni_id:
-            continue
-        # Use existing row helper to normalise fields
-        full = get_row(course_id)
-        uni_name = UNIVERSITY_NAME_MAP.get(uni_id, uni_id)
-        if uni_id not in seen_unis:
-            universities.append({"university_id": uni_id, "university_name": uni_name})
-            seen_unis.add(uni_id)
-
-        min_req = clean_str(full.get("min_requirements"))
-        if min_req and len(min_examples) < 3 and min_req not in min_examples:
-            min_examples.append(min_req)
-
-        offerings.append(
-            {
-                "course_id": full.get("course_id"),
-                "university_id": uni_id,
-                "university_name": uni_name,
-                "typical_offer": full.get("typical_offer"),
-                "required_subjects": full.get("required_subjects"),
-                "course_url": full.get("course_url"),
-                "estimated_annual_cost_international": full.get("estimated_annual_cost_international"),
-                "min_requirements": full.get("min_requirements"),
-            }
-        )
-
-    min_entry_hint = min_examples[0] if min_examples else None
-    course_meta = {
-        "course_key": course_key,
-        "course_name": sample_name,
-        "universities_count": len(universities),
-        "universities": universities,
-        "faculties": faculties,
-        "degree_types": degree_types,
-        "min_entry_hint": min_entry_hint,
-    }
-
-    return {"course": course_meta, "offerings": offerings}
+# unique_courses and unique_course_detail replaced by new /course-groups endpoints below
 
 
 @app.post("/api/py/assess")
@@ -3013,3 +2848,433 @@ async def ps_evaluate(request: Request):
             "latency_ms": latency_total,
         },
     })
+
+
+# ─────────────────────────────────────────────────────────────
+# Startup: pre-load CSV + emit quality report
+# ─────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def _startup():
+    try:
+        offerings = load_offerings()
+        rpt = _csv_quality_report
+        logger.info(
+            f"[startup] CSV loaded — {rpt['rows_loaded']} offerings, "
+            f"{rpt['fixed_case_c']} case-C fixes, "
+            f"{rpt['dropped']} dropped. "
+            f"Data file: {rpt.get('data_file', 'master_courses.csv')}"
+        )
+        if rpt["dropped"] > 0:
+            logger.warning(f"[startup] Dropped course_ids: {rpt['dropped_course_ids']}")
+        if rpt["fix_details"]:
+            for fix in rpt["fix_details"]:
+                logger.info(
+                    f"[startup] Fixed {fix['fix_type']}: {fix['course_id']} "
+                    f"'{fix['original_course_name']}' → '{fix['fixed_course_name']}'"
+                )
+    except Exception as exc:
+        logger.error(f"[startup] CSV load failed: {exc}", exc_info=True)
+
+
+# ─────────────────────────────────────────────────────────────
+# New data quality endpoint
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/api/py/data-quality")
+def data_quality():
+    """Returns the CSV data quality report generated at startup."""
+    offerings = load_offerings()
+    rpt = dict(_csv_quality_report)
+    rpt["data_file"] = "master_courses.csv"
+    return rpt
+
+
+# ─────────────────────────────────────────────────────────────
+# /api/py/universities  (extended: now includes offering_count)
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/api/py/universities")
+def universities_v2():
+    offerings = load_offerings()
+    counts: Dict[str, int] = {}
+    for o in offerings:
+        uid = o["university_id"]
+        counts[uid] = counts.get(uid, 0) + 1
+
+    result = []
+    for uid in sorted(counts.keys()):
+        result.append({
+            "uni_code": uid,
+            "uni_name": UNIVERSITY_NAME_MAP.get(uid, uid),
+            "university_id": uid,           # backward compat alias
+            "university_name": UNIVERSITY_NAME_MAP.get(uid, uid),  # backward compat
+            "offering_count": counts[uid],
+        })
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# /api/py/offerings
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/api/py/offerings")
+def offerings_list(
+    uni_code: Optional[str] = None,
+    query: Optional[str] = None,
+):
+    """
+    Returns offerings list.
+    Filters by uni_code and/or query (searches course_name, faculty, university_name).
+    """
+    all_offerings = load_offerings()
+    result = all_offerings
+
+    if uni_code:
+        uc = uni_code.upper()
+        result = [o for o in result if o["university_id"].upper() == uc]
+
+    if query:
+        q = query.lower()
+        result = [
+            o for o in result
+            if q in o["course_name"].lower()
+            or q in o["faculty"].lower()
+            or q in o["university_name"].lower()
+            or q in o["degree_type"].lower()
+        ]
+
+    # Return light version for list view
+    return [
+        {
+            "course_id": o["course_id"],
+            "university_id": o["university_id"],
+            "university_name": o["university_name"],
+            "faculty": o["faculty"],
+            "course_name": o["course_name"],
+            "degree_type": o["degree_type"],
+            "typical_offer": o["typical_offer"],
+            "min_points_home": o["min_points_home"],
+            "estimated_annual_cost_international": o["estimated_annual_cost_international"],
+            "course_url": o["course_url"],
+        }
+        for o in result
+    ]
+
+
+@app.get("/api/py/offerings/{course_id}")
+def offering_detail(course_id: str):
+    """Returns full offering detail for a single course_id."""
+    o = _get_offering_clean(course_id)
+    if o is None:
+        raise HTTPException(status_code=404, detail=f"course_id not found: {course_id}")
+    return o
+
+
+# Backward compat aliases
+@app.get("/api/py/courses")
+def courses_alias(university_id: Optional[str] = None, query: Optional[str] = None):
+    return offerings_list(uni_code=university_id, query=query)
+
+
+@app.get("/api/py/course/{course_id}")
+def course_alias(course_id: str):
+    return offering_detail(course_id)
+
+
+# ─────────────────────────────────────────────────────────────
+# /api/py/course-groups
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/api/py/course-groups")
+def course_groups(query: Optional[str] = None):
+    """
+    Returns deduped course group list (one entry per logical course).
+    Each entry shows how many universities offer the course.
+    """
+    all_offerings = load_offerings()
+
+    if query:
+        q = query.lower()
+        all_offerings = [
+            o for o in all_offerings
+            if q in o["course_name"].lower()
+            or q in o["faculty"].lower()
+        ]
+
+    groups = build_course_groups(all_offerings)
+    return groups
+
+
+@app.get("/api/py/course-groups/{course_group_key}")
+def course_group_detail(course_group_key: str):
+    """
+    Detailed view of a course group: group metadata + all per-university offerings.
+    """
+    group_offerings = get_offerings_for_group(course_group_key)
+    if not group_offerings:
+        raise HTTPException(status_code=404, detail=f"course_group_key not found: {course_group_key}")
+
+    # Build group meta from the offerings
+    sample = group_offerings[0]
+    uni_names_seen: list = []
+    uni_ids_seen: set = set()
+    for o in group_offerings:
+        if o["university_id"] not in uni_ids_seen:
+            uni_names_seen.append(o["university_name"])
+            uni_ids_seen.add(o["university_id"])
+
+    group_meta = {
+        "course_group_key": course_group_key,
+        "course_group_name": sample["course_name"],
+        "offerings_count": len(group_offerings),
+        "offerings_preview": uni_names_seen[:3],
+        "representative_faculty": sample.get("faculty", ""),
+    }
+
+    offering_list = [
+        {
+            "course_id": o["course_id"],
+            "university_id": o["university_id"],
+            "university_name": o["university_name"],
+            "faculty": o["faculty"],
+            "course_name": o["course_name"],
+            "degree_type": o["degree_type"],
+            "typical_offer": o["typical_offer"],
+            "min_requirements": o["min_requirements"],
+            "min_points_home": o["min_points_home"],
+            "intl_buffer_points": o["intl_buffer_points"],
+            "required_subjects": o["required_subjects"],
+            "recommended_subjects": o["recommended_subjects"],
+            "ps_expected_signals": o["ps_expected_signals"],
+            "estimated_annual_cost_international": o["estimated_annual_cost_international"],
+            "course_url": o["course_url"],
+            "notes": o["notes"],
+        }
+        for o in group_offerings
+    ]
+
+    return {"group": group_meta, "offerings": offering_list}
+
+
+# Backward compat aliases
+@app.get("/api/py/unique_courses")
+def unique_courses_alias(q: Optional[str] = None):
+    return course_groups(query=q)
+
+
+@app.get("/api/py/unique_courses/{course_key}")
+def unique_course_detail_alias(course_key: str):
+    """Backward compat: maps old unique_courses key format to new course-groups key."""
+    return course_group_detail(course_key)
+
+
+# ─────────────────────────────────────────────────────────────
+# /api/py/recommend  (Explorer Clarity Session)
+# ─────────────────────────────────────────────────────────────
+
+class RecommendRequest(BaseModel):
+    # Student context
+    curriculum: str = Field(pattern="^(IB|A_LEVELS)$")
+    home_or_intl: str = Field(default="INTL", pattern="^(HOME|INTL)$")
+    ib_total_points: Optional[int] = Field(default=None, ge=0, le=45)
+    alevel_predicted_summary: Optional[str] = None
+    # Preferences
+    optimize_for: Optional[str] = Field(default="BALANCE", pattern="^(PRESTIGE|BUDGET|BALANCE)$")
+    vibe_tags: Optional[List[str]] = Field(default_factory=list)
+    location_tags: Optional[List[str]] = Field(default_factory=list)
+    interest_tags: List[str] = Field(default_factory=list)
+    free_text: Optional[str] = None
+    top_n: int = Field(default=8, ge=1, le=20)
+    # Exclusions (course_ids already in shortlist/strategy)
+    exclude_course_ids: Optional[List[str]] = Field(default_factory=list)
+
+
+def _score_offering_for_recommendation(
+    offering: Dict[str, Any],
+    req: RecommendRequest,
+) -> Tuple[int, List[str]]:
+    """
+    Deterministic fit scoring: returns (score 0-100, reasons list).
+    Grounded purely in CSV fields — no hallucination.
+    """
+    score = 50
+    reasons: List[str] = []
+    name_lower = offering["course_name"].lower()
+    faculty_lower = offering["faculty"].lower()
+    signals_lower = offering["ps_expected_signals"].lower()
+    combined = f"{name_lower} {faculty_lower} {signals_lower}"
+
+    # Interest tag matching
+    interest_hits = 0
+    for tag in req.interest_tags:
+        if tag.lower() in combined:
+            interest_hits += 1
+    if interest_hits > 0:
+        bonus = min(20, interest_hits * 7)
+        score += bonus
+        reasons.append(f"Matches your interest in {', '.join(req.interest_tags[:2])}")
+
+    # Optimize for: BUDGET
+    if req.optimize_for == "BUDGET":
+        cost = offering.get("estimated_annual_cost_international") or 0
+        if cost and cost < 25000:
+            score += 10
+            reasons.append(f"Strong value: ~£{cost:,}/yr tuition")
+        elif cost and cost < 30000:
+            score += 5
+            reasons.append(f"Moderate cost: ~£{cost:,}/yr tuition")
+
+    # Optimize for: PRESTIGE
+    if req.optimize_for == "PRESTIGE":
+        prestige_unis = {"OXF", "CAM", "LSE", "IMP", "UCL"}
+        if offering["university_id"] in prestige_unis:
+            score += 12
+            reasons.append(f"Top-ranked: {offering['university_name']}")
+
+    # Grade fit (IB)
+    if req.curriculum == "IB" and req.ib_total_points:
+        min_pts = offering.get("min_points_home") or 0
+        intl_buf = offering.get("intl_buffer_points") or 0
+        effective_threshold = min_pts + (intl_buf if req.home_or_intl == "INTL" else 0)
+        if effective_threshold > 0:
+            margin = req.ib_total_points - effective_threshold
+            if margin >= 3:
+                score += 12
+                reasons.append(f"Your IB score is comfortably above the typical offer")
+            elif margin >= 0:
+                score += 6
+                reasons.append(f"Your IB score meets the typical offer")
+            elif margin >= -2:
+                score -= 8
+                reasons.append(f"Your IB score is slightly below the typical offer")
+            else:
+                score -= 20
+
+    # Location tags
+    uni_id = offering["university_id"]
+    london_unis = {"KCL", "UCL", "LSE", "IMP"}
+    if "LONDON" in (req.location_tags or []) and uni_id in london_unis:
+        score += 6
+        reasons.append(f"Based in London")
+    elif "BIG_CITY" in (req.location_tags or []) and uni_id in (london_unis | {"MAN", "EDIN", "BRIS"}):
+        score += 4
+        reasons.append(f"Located in a major city")
+
+    # Vibe tags (proxied by faculty/course signals)
+    if "INTELLECTUAL" in (req.vibe_tags or []):
+        intellectual_signals = ["critical", "theory", "research", "philosophy", "analysis"]
+        if any(sig in combined for sig in intellectual_signals):
+            score += 5
+    if "CAREER" in (req.vibe_tags or []):
+        career_signals = ["management", "business", "finance", "engineering", "computing"]
+        if any(sig in combined for sig in career_signals):
+            score += 5
+
+    # Cap score
+    score = max(0, min(99, score))
+
+    # Always include at least one reason
+    if not reasons:
+        reasons.append(f"Relevant to your stated interests")
+    reasons = reasons[:3]
+
+    return score, reasons
+
+
+@app.post("/api/py/recommend")
+async def recommend(payload: RecommendRequest):
+    """
+    Explorer Clarity Session: returns ranked offering recommendations with
+    fit scores and deterministic reasons grounded in CSV data.
+    AI layer adds a brief tradeoff note per recommendation.
+    """
+    tid = uuid.uuid4().hex[:8]
+    all_offerings = load_offerings()
+
+    # Filter out excluded course_ids
+    exclude_set = set(payload.exclude_course_ids or [])
+    pool = [o for o in all_offerings if o["course_id"] not in exclude_set]
+
+    # Score all offerings
+    scored: List[Tuple[int, Dict[str, Any], List[str]]] = []
+    for o in pool:
+        fit, reasons = _score_offering_for_recommendation(o, payload)
+        scored.append((fit, o, reasons))
+
+    # Sort by fit score descending
+    scored.sort(key=lambda x: -x[0])
+    top = scored[: max(payload.top_n * 2, 20)]  # over-fetch for AI to re-rank
+
+    # Build result dicts
+    recommendations = []
+    for fit, o, reasons in top[: payload.top_n]:
+        recommendations.append(
+            {
+                "course_id": o["course_id"],
+                "university_id": o["university_id"],
+                "university_name": o["university_name"],
+                "faculty": o["faculty"],
+                "course_name": o["course_name"],
+                "degree_type": o["degree_type"],
+                "fit_score": fit,
+                "reasons": reasons,
+                "typical_offer": o["typical_offer"],
+                "min_points_home": o["min_points_home"],
+                "required_subjects": o["required_subjects"],
+                "ps_expected_signals": o["ps_expected_signals"],
+                "estimated_annual_cost_international": o["estimated_annual_cost_international"],
+                "course_url": o["course_url"],
+                "notes": o["notes"],
+                "ai_note": None,  # filled in below if Gemini available
+            }
+        )
+
+    # AI layer: add personalised tradeoff note per recommendation
+    if is_gemini_available() and recommendations:
+        course_list = "\n".join(
+            f"- {r['course_name']} at {r['university_name']} (fit: {r['fit_score']})"
+            for r in recommendations[:8]
+        )
+        interests_str = ", ".join(payload.interest_tags[:6]) or "general"
+        optimize_str = payload.optimize_for or "BALANCE"
+        free_text_str = payload.free_text or ""
+
+        prompt = f"""You are a UK UCAS admissions advisor.
+
+Student profile:
+- Curriculum: {payload.curriculum}
+- Interests: {interests_str}
+- Optimising for: {optimize_str}
+- Student's own words: "{free_text_str}"
+
+Recommended courses (already scored deterministically):
+{course_list}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{{
+  "notes": {{
+    "<course_name> at <university_name>": "<1 sentence: specific fit reason or honest tradeoff — ≤25 words>"
+  }}
+}}
+
+Rules:
+- Keys must exactly match the format "<course_name> at <university_name>" as listed above
+- Be honest about tradeoffs (workload, selectivity, location, etc.)
+- Never invent entry requirements or acceptance rates
+- ≤25 words per note"""
+
+        result, err, _ = call_gemini_json(prompt, trace_id=tid, temperature=0.35)
+        if result and not err:
+            notes_map: Dict[str, str] = result.get("notes") or {}
+            for r in recommendations:
+                key = f"{r['course_name']} at {r['university_name']}"
+                if key in notes_map:
+                    r["ai_note"] = notes_map[key]
+
+    return {
+        "status": "ok",
+        "recommendations": recommendations,
+        "total_pool": len(pool),
+        "ai_enhanced": is_gemini_available(),
+    }
