@@ -83,6 +83,9 @@ export default function ResultPage() {
 
   return (
     <div style={{ padding: "48px 52px", maxWidth: "780px" }}>
+      {/* Page label */}
+      <p className="label" style={{ marginBottom: "28px" }}>Results</p>
+
       {/* Hero result */}
       <div style={{ marginBottom: "32px" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "20px" }}>
@@ -235,9 +238,9 @@ export default function ResultPage() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+      <div style={{ display: "flex", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
         <Link href="/dashboard/assess" className="btn btn-prim">Try another →</Link>
-        <Link href="/dashboard/tracker" className="btn btn-ghost">View tracker</Link>
+        <Link href="/dashboard/strategy" className="btn btn-ghost">Build strategy</Link>
         <Link href="/dashboard/ps" className="btn btn-ghost">Analyse PS</Link>
       </div>
     </div>
