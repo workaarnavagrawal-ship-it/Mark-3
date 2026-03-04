@@ -1,5 +1,13 @@
 import { createClient } from "./supabase/client";
-import type { Profile, ProfileWithSubjects, PSAnalysisResponse, SubjectEntry, TrackerEntry } from "./types";
+import type {
+  Profile,
+  ProfileWithSubjects,
+  PSAnalysisResponse,
+  SubjectEntry,
+  TrackerEntry,
+  StrategyChoice,
+  ShortlistItem,
+} from "./types";
 
 // ── Profile ──────────────────────────────────────────────────────
 export async function getProfile(): Promise<ProfileWithSubjects | null> {
@@ -94,4 +102,101 @@ export async function savePSAnalysis(result: PSAnalysisResponse): Promise<void> 
     .from("profiles")
     .update({ ps_last_analysis: result, updated_at: new Date().toISOString() })
     .eq("user_id", user.id);
+}
+
+// ── Strategy choices ──────────────────────────────────────────────
+
+export async function getStrategyChoices(): Promise<StrategyChoice[]> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase
+    .from("strategy_choices")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("slot");
+  return data || [];
+}
+
+export async function upsertStrategySlot(
+  choice: Omit<StrategyChoice, "id">
+): Promise<StrategyChoice | null> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from("strategy_choices")
+    .upsert(
+      { ...choice, user_id: user.id, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,slot" }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function clearStrategySlot(slot: number): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  await supabase
+    .from("strategy_choices")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("slot", slot);
+}
+
+// ── Shortlist items ───────────────────────────────────────────────
+
+export async function getShortlistItems(): Promise<ShortlistItem[]> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase
+    .from("shortlist_items")
+    .select("*")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+  return data || [];
+}
+
+export async function addShortlistItem(
+  item: Omit<ShortlistItem, "id" | "user_id" | "created_at">
+): Promise<ShortlistItem | null> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from("shortlist_items")
+    .insert({ ...item, user_id: user.id })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function removeShortlistItem(id: string): Promise<void> {
+  const supabase = createClient();
+  await supabase.from("shortlist_items").delete().eq("id", id);
+}
+
+export async function isShortlisted(
+  item_type: "COURSE_GROUP" | "OFFERING",
+  key: string
+): Promise<string | null> {
+  // Returns the item id if shortlisted, otherwise null
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const col = item_type === "COURSE_GROUP" ? "course_group_key" : "course_id";
+  const { data } = await supabase
+    .from("shortlist_items")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("item_type", item_type)
+    .eq(col, key)
+    .maybeSingle();
+  return data?.id ?? null;
 }

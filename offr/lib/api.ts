@@ -230,3 +230,41 @@ export const removeShortlistedCourse = (course_key: string) =>
   shortlistFetch<{ success: true }>(`/api/shortlist/${encodeURIComponent(course_key)}`, {
     method: "DELETE",
   });
+
+// ── Strategy choices (Next.js API, Supabase-backed) ───────────────
+
+export const listStrategyChoices = () =>
+  shortlistFetch<import("./types").StrategyChoice[]>("/api/strategy");
+
+export const upsertStrategySlot = (
+  body: Omit<import("./types").StrategyChoice, "id">
+) =>
+  shortlistFetch<import("./types").StrategyChoice>("/api/strategy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+export const clearStrategySlot = (slot: number) =>
+  shortlistFetch<{ success: true }>(`/api/strategy/${slot}`, {
+    method: "DELETE",
+  });
+
+// ── Shortlist items (new richer shortlist) ────────────────────────
+
+export const listShortlistItems = () =>
+  shortlistFetch<import("./types").ShortlistItem[]>("/api/shortlist-items");
+
+export const addShortlistItem = (
+  body: Omit<import("./types").ShortlistItem, "id" | "user_id" | "created_at">
+) =>
+  shortlistFetch<import("./types").ShortlistItem>("/api/shortlist-items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+export const removeShortlistItem = (id: string) =>
+  shortlistFetch<{ success: true }>(`/api/shortlist-items/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
