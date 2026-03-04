@@ -44,11 +44,22 @@ export async function updateSession(request: NextRequest) {
   }
 
   const pathname = request.nextUrl.pathname;
-  const isPublic = ["/", "/auth"].some(p => pathname === p) ||
+
+  const isPublic =
+    pathname === "/" ||
+    pathname === "/auth" ||
     pathname.startsWith("/auth/") ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/py");
+
+  // Protected routes redirect unauthenticated users to /auth (not landing)
+  const isProtected =
+    pathname.startsWith("/dashboard") || pathname === "/onboarding";
+
+  if (!user && isProtected) {
+    return NextResponse.redirect(new URL("/auth", request.url));
+  }
 
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL("/", request.url));
