@@ -14,7 +14,7 @@ export interface AIErrorPayload {
 // ── Profile ─────────────────────────────────────────────────────
 export type Curriculum = "IB" | "A_LEVELS";
 export type YearGroup = "11" | "12";
-export type HomeOrIntl = "home" | "intl";
+export type HomeOrIntl = "home" | "intl" | "HOME" | "INTL";
 
 export interface SubjectEntry {
   id?: string;
@@ -31,16 +31,28 @@ export interface Profile {
   year: YearGroup;
   curriculum: Curriculum;
   home_or_intl: HomeOrIntl;
-  interests: string[]; // max 3
-  core_points?: number; // IB EE+TOK
+  // Monologue persona
+  persona?: PersonaCode;
+  // IB score breakdown
+  ib_subject_total?: number | null;
+  ib_bonus_points?: number | null;
+  ib_total_points?: number | null;
+  // A-Level predicted grades (map: subject → grade)
+  alevel_predicted?: Record<string, string> | null;
+  // Interests
+  interests: string[]; // max 3 (legacy)
+  interest_tags?: string[]; // structured interest tags
+  core_points?: number; // IB EE+TOK (legacy — use ib_bonus_points)
+  // PS
   ps_q1?: string;
   ps_q2?: string;
   ps_q3?: string;
   ps_format?: "UCAS_3Q" | "LEGACY";
   ps_statement?: string;
   ps_last_analysis?: PSAnalysisResponse;
-  interests_text?: string;       // free-text "what I like" captured in onboarding
-  extracurriculars?: string[];   // curated + custom multi-select
+  // Context
+  interests_text?: string;
+  extracurriculars?: string[];
   created_at?: string;
   updated_at?: string;
 }
