@@ -13,7 +13,7 @@ const FAQS = [
   { category: "Your profile", q: "Can I use offr for A-Levels as well as IB?", a: "Yes. offr supports both IB Diploma and A-Level students. Your predicted grades are compared against real offer holder profiles for each course." },
   { category: "Tracker & strategy", q: "How does the Offer Tracker work?", a: "Every time you run an assessment, it's saved automatically to your tracker. You can label each choice (Firm, Insurance, Backup, Wildcard), view your full UCAS picture in one place, and delete or re-run any entry." },
   { category: "Tracker & strategy", q: "What are hidden gems in Explore?", a: "Hidden gems are excellent, career-relevant courses that are less well-known than the obvious options — things like MORSE at Warwick, Cognitive Science at Edinburgh, or Management Science at LSE. They often have lower competition and strong graduate outcomes." },
-  { category: "Tracker & strategy", q: "What does the Strategy page do?", a: "Strategy helps you audit your UCAS shortlist as a whole. It analyses your Safe/Target/Reach mix and flags if your list is unbalanced. It also surfaces PS improvement tips and alternative course suggestions based on your interests." },
+  { category: "Tracker & strategy", q: "What does My Strategy do?", a: "My Strategy is your UCAS 5-slot builder. You assign specific course offerings from your shortlist into each of the 5 slots, then see a Safe/Target/Reach mix breakdown based on your assessed chances. It helps you make sure your final application is balanced — not too many Reaches, at least one Safe." },
   { category: "General", q: "Is offr free?", a: "Yes, completely. No credit card, no premium tier." },
   { category: "General", q: "What universities does offr cover?", a: "We currently cover 14 UK universities including Oxford, Cambridge, LSE, Imperial, UCL, Warwick, Edinburgh, Bristol, Durham, Bath, St Andrews, King's College London, Manchester, and Exeter." },
 ];
@@ -143,8 +143,8 @@ export default function FAQPage() {
   return (
     <div style={{ padding: "48px 52px", maxWidth: "700px" }}>
       <div style={{ marginBottom: "40px" }}>
-        <p className="label" style={{ marginBottom: "10px" }}>Support</p>
-        <h1 className="serif" style={{ fontSize: "44px", fontWeight: 400, letterSpacing: "-0.025em", color: "var(--t)", marginBottom: "12px" }}>FAQ</h1>
+        <p className="label" style={{ marginBottom: "10px" }}>Account</p>
+        <h1 className="serif" style={{ fontSize: "40px", fontWeight: 400, letterSpacing: "-0.025em", color: "var(--t)", marginBottom: "12px" }}>FAQ</h1>
         <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65 }}>Everything you need to know about how offr works.</p>
       </div>
 

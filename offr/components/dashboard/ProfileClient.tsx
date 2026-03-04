@@ -54,6 +54,12 @@ export function ProfileClient({ profile, subjects }: { profile: Profile; subject
       const p = await upsertProfile({
         name, year, curriculum: profile.curriculum, home_or_intl: homeOrIntl,
         interests, core_points: corePoints,
+        // Preserve existing interest_tags + IB score fields set during onboarding
+        interest_tags: profile.interest_tags,
+        ib_subject_total: profile.ib_subject_total,
+        ib_bonus_points: profile.ib_bonus_points,
+        ib_total_points: profile.ib_total_points,
+        alevel_predicted: profile.alevel_predicted,
         ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement,
         interests_text: interestsText.trim() || undefined,
         extracurriculars,
