@@ -3,29 +3,33 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   getUniqueCourses,
-  listShortlistedCourses,
-  addShortlistedCourse,
-  removeShortlistedCourse,
+  listShortlistItems,
+  addShortlistItem,
+  removeShortlistItem,
   postSuggest,
 } from "@/lib/api";
 import { AIBlock } from "@/components/ai/AIBlock";
 import { CourseDetailModal } from "./CourseDetailModal";
-import type { AIStatus, UniqueCourse, HiddenGemRecommendation, ShortlistedCourse } from "@/lib/types";
+import { PersonaBadge } from "@/components/ui/PersonaBadge";
+import type { AIStatus, UniqueCourse, HiddenGemRecommendation, PersonaCode } from "@/lib/types";
 
 interface ExploreClientProps {
   interests: string[];
+  interestTags?: string[];
+  curriculum?: string;
+  persona?: PersonaCode;
 }
 
 type TabFilter = "all" | "shortlisted";
 
-export function ExploreClient({ interests }: ExploreClientProps) {
+export function ExploreClient({ interests, interestTags = [], curriculum = "IB", persona }: ExploreClientProps) {
   const [courses, setCourses] = useState<UniqueCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
 
-  // Shortlist state
-  const [shortlistedKeys, setShortlistedKeys] = useState<Set<string>>(new Set());
+  // Shortlist state: course_group_key → shortlist_item id
+  const [shortlistedMap, setShortlistedMap] = useState<Map<string, string>>(new Map());
   const [shortlistBusy, setShortlistBusy] = useState<string | null>(null); // course_key being toggled
   const [shortlistErr, setShortlistErr] = useState("");
 
@@ -44,17 +48,24 @@ export function ExploreClient({ interests }: ExploreClientProps) {
       try {
         const [coursesData, shortlistData] = await Promise.all([
           getUniqueCourses(),
-          listShortlistedCourses().catch(() => [] as ShortlistedCourse[]),
+          listShortlistItems().catch(() => []),
         ]);
         if (!cancelled) {
           setCourses(coursesData);
-          setShortlistedKeys(new Set(shortlistData.map((s) => s.course_key)));
+          // Build map: course_group_key → id for COURSE_GROUP items
+          const m = new Map<string, string>();
+          shortlistData.forEach(item => {
+            if (item.item_type === "COURSE_GROUP" && item.course_group_key && item.id) {
+              m.set(item.course_group_key, item.id);
+            }
+          });
+          setShortlistedMap(m);
           // Trigger AI gem loading now that courses are available
           loadGems(coursesData);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setErr(e?.message || "Failed to load courses.");
+          setErr((e as Error)?.message || "Failed to load courses.");
         }
       } finally {
         if (!cancelled) {
@@ -74,42 +85,47 @@ export function ExploreClient({ interests }: ExploreClientProps) {
     async (course: UniqueCourse) => {
       if (shortlistBusy) return;
       const key = course.course_key;
-      const wasShortlisted = shortlistedKeys.has(key);
+      const existingId = shortlistedMap.get(key);
+      const wasShortlisted = !!existingId;
 
       // Optimistic update
       setShortlistBusy(key);
       setShortlistErr("");
-      setShortlistedKeys((prev) => {
-        const next = new Set(prev);
+      setShortlistedMap((prev) => {
+        const next = new Map(prev);
         if (wasShortlisted) next.delete(key);
-        else next.add(key);
+        else next.set(key, "__pending__");
         return next;
       });
 
       try {
-        if (wasShortlisted) {
-          await removeShortlistedCourse(key);
+        if (wasShortlisted && existingId) {
+          await removeShortlistItem(existingId);
+          setShortlistedMap((prev) => { const next = new Map(prev); next.delete(key); return next; });
         } else {
-          await addShortlistedCourse({
-            course_key: key,
+          const result = await addShortlistItem({
+            item_type: "COURSE_GROUP",
+            course_group_key: key,
             course_name: course.course_name,
-            universities_count: course.universities_count,
           });
+          if (result.id) {
+            setShortlistedMap((prev) => new Map(prev).set(key, result.id!));
+          }
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         // Revert optimistic update
-        setShortlistedKeys((prev) => {
-          const next = new Set(prev);
-          if (wasShortlisted) next.add(key);
+        setShortlistedMap((prev) => {
+          const next = new Map(prev);
+          if (wasShortlisted && existingId) next.set(key, existingId);
           else next.delete(key);
           return next;
         });
-        setShortlistErr(e?.message || "Failed to update shortlist. Please try again.");
+        setShortlistErr((e as Error)?.message || "Failed to update shortlist. Please try again.");
       } finally {
         setShortlistBusy(null);
       }
     },
-    [shortlistedKeys, shortlistBusy],
+    [shortlistedMap, shortlistBusy],
   );
 
   // ── Hidden gems — AI-powered via /api/py/suggest ─────────────────
@@ -118,13 +134,14 @@ export function ExploreClient({ interests }: ExploreClientProps) {
   const [gemsError,    setGemsError]    = useState<string | null>(null);
 
   const loadGems = useCallback(async (allCourses: UniqueCourse[]) => {
-    if (!interests.length) return;
+    const activeInterests = interestTags.length ? interestTags : interests;
+    if (!activeInterests.length) return;
     setGemsStatus("loading");
     setGemsError(null);
     try {
       const res = await postSuggest({
-        interests,
-        curriculum: "IB",   // curriculum not critical for name-matching; explored cross-curriculum
+        interests: activeInterests,
+        curriculum: curriculum || "IB",
         top_n: 5,
       });
       // Map AI suggestions back to full UniqueCourse objects by name (for shortlist / modal)
@@ -148,7 +165,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
 
     // Tab filter
     if (tab === "shortlisted") {
-      list = list.filter((c) => shortlistedKeys.has(c.course_key));
+      list = list.filter((c) => shortlistedMap.has(c.course_key));
     }
 
     // Search filter
@@ -162,33 +179,29 @@ export function ExploreClient({ interests }: ExploreClientProps) {
     }
 
     return list;
-  }, [courses, search, tab, shortlistedKeys]);
+  }, [courses, search, tab, shortlistedMap]);
+
+  const hasInterests = (interestTags.length > 0) || (interests.length > 0);
 
   return (
     <div style={{ padding: "48px 52px", maxWidth: "860px" }}>
 
       {/* ── Page header ─────────────────────────────────────────────── */}
-      <div style={{ marginBottom: "40px" }}>
-        <p className="label" style={{ marginBottom: "10px" }}>Discovery</p>
-        <h1
-          className="serif"
-          style={{
-            fontSize: "44px",
-            fontWeight: 400,
-            color: "var(--t)",
-            marginBottom: "10px",
-            letterSpacing: "-0.02em",
-          }}
-        >
-          Explore Courses
-        </h1>
-        <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65 }}>
-          Every course in the Offr dataset, deduplicated across universities. Use this to discover options, then check your chances.
-        </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "40px", flexWrap: "wrap", gap: "16px" }}>
+        <div>
+          <p className="label" style={{ marginBottom: "10px" }}>Database</p>
+          <h1 className="serif" style={{ fontSize: "40px", fontWeight: 400, color: "var(--t)", marginBottom: "8px", letterSpacing: "-0.02em" }}>
+            Explore Courses
+          </h1>
+          <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65 }}>
+            Every course in the Offr dataset, deduplicated across universities. Shortlist anything interesting.
+          </p>
+        </div>
+        {persona && <PersonaBadge persona={persona} />}
       </div>
 
       {/* ── Hidden Gems — AI-powered ─────────────────────────────────── */}
-      {!loading && !err && interests.length > 0 && (
+      {!loading && !err && hasInterests && (
         <div style={{ marginBottom: "40px" }}>
           <div style={{ marginBottom: "14px" }}>
             <p className="label" style={{ marginBottom: "4px" }}>Personalised for you</p>
@@ -208,7 +221,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
                   <HiddenGemRow
                     key={gem.course.course_key}
                     gem={gem}
-                    isShortlisted={shortlistedKeys.has(gem.course.course_key)}
+                    isShortlisted={shortlistedMap.has(gem.course.course_key)}
                     shortlistBusy={shortlistBusy === gem.course.course_key}
                     onOpen={setOpenCourse}
                     onToggleShortlist={toggleShortlist}
@@ -227,7 +240,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
       )}
 
       {/* No interests → gem nudge */}
-      {!loading && !err && interests.length === 0 && (
+      {!loading && !err && !hasInterests && (
         <div
           style={{
             marginBottom: "28px",
@@ -283,7 +296,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
             >
               {t === "all"
                 ? "All courses"
-                : `Shortlisted (${shortlistedKeys.size})`}
+                : `Shortlisted (${shortlistedMap.size})`}
             </button>
           ))}
         </div>
@@ -376,7 +389,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
         >
           Fetching courses…
         </div>
-      ) : tab === "shortlisted" && shortlistedKeys.size === 0 ? (
+      ) : tab === "shortlisted" && shortlistedMap.size === 0 ? (
         <div
           style={{
             padding: "48px 32px",
@@ -418,7 +431,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
             <CourseRow
               key={c.course_key}
               course={c}
-              isShortlisted={shortlistedKeys.has(c.course_key)}
+              isShortlisted={shortlistedMap.has(c.course_key)}
               shortlistBusy={shortlistBusy === c.course_key}
               onOpen={setOpenCourse}
               onToggleShortlist={toggleShortlist}
@@ -432,7 +445,7 @@ export function ExploreClient({ interests }: ExploreClientProps) {
         <CourseDetailModal
           course={openCourse}
           onClose={() => setOpenCourse(null)}
-          isShortlisted={shortlistedKeys.has(openCourse.course_key)}
+          isShortlisted={shortlistedMap.has(openCourse.course_key)}
           shortlistBusy={shortlistBusy === openCourse.course_key}
           onToggleShortlist={toggleShortlist}
         />
