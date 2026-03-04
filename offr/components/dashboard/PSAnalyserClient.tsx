@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import type { Profile, PSEvaluateSuccess, PSEvaluateError } from "@/lib/types";
+import type { Profile, PSEvaluateSuccess, PSEvaluateError, PersonaCode } from "@/lib/types";
 import { psEvaluate } from "@/lib/api";
+import { PersonaBadge } from "@/components/ui/PersonaBadge";
 
 // ── Constants ────────────────────────────────────────────────
 const Q_LIMIT   = 1000;  // UCAS 2025 per-question character limit
@@ -72,7 +73,7 @@ const RUBRIC_LABELS: Record<string, string> = {
 };
 
 // ── Main component ────────────────────────────────────────────
-export function PSAnalyserClient({ profile }: { profile: Profile }) {
+export function PSAnalyserClient({ profile, persona }: { profile: Profile; persona?: PersonaCode }) {
   const savedFormat = (profile.ps_format as "UCAS_3Q" | "LEGACY") || "UCAS_3Q";
   const [format, setFormat] = useState<"UCAS_3Q" | "LEGACY">(savedFormat);
 
@@ -178,14 +179,17 @@ export function PSAnalyserClient({ profile }: { profile: Profile }) {
     <div style={{ padding: "48px 52px", maxWidth: "1100px" }}>
 
       {/* ── Header ───────────────────────────────────────── */}
-      <div style={{ marginBottom: "32px" }}>
-        <p className="label" style={{ marginBottom: "10px" }}>Academic writing</p>
-        <h1 className="serif" style={{ fontSize: "44px", fontWeight: 400, color: "var(--t)", marginBottom: "10px", letterSpacing: "-0.02em" }}>
-          PS Analyser
-        </h1>
-        <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65, maxWidth: "520px" }}>
-          AI feedback on your personal statement, evaluated specifically for your target course.
-        </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "32px", flexWrap: "wrap", gap: "16px" }}>
+        <div>
+          <p className="label" style={{ marginBottom: "10px" }}>Your PS</p>
+          <h1 className="serif" style={{ fontSize: "40px", fontWeight: 400, color: "var(--t)", marginBottom: "8px", letterSpacing: "-0.02em" }}>
+            PS Analyser
+          </h1>
+          <p style={{ fontSize: "14px", color: "var(--t3)", lineHeight: 1.65, maxWidth: "520px" }}>
+            AI feedback on your personal statement, evaluated specifically for your target course.
+          </p>
+        </div>
+        {persona && <PersonaBadge persona={persona} />}
       </div>
 
       {/* ── Context inputs ────────────────────────────────── */}
