@@ -210,6 +210,77 @@ html, body {
 .link-chances-pill:hover { border-color: var(--b-strong); color: var(--t); }
 .tog-active { background: var(--acc); color: var(--t-inv); border-color: var(--acc); font-weight: 500; }
 
+/* ── Monologue design tokens ───────────────────────────────── */
+
+/* Persona colours */
+:root {
+  --persona-explorer:      #7EC8D4;
+  --persona-explorer-bg:   rgba(126,200,212,0.10);
+  --persona-explorer-b:    rgba(126,200,212,0.22);
+  --persona-strategist:    #C4A96A;
+  --persona-strategist-bg: rgba(196,169,106,0.10);
+  --persona-strategist-b:  rgba(196,169,106,0.22);
+  --persona-finisher:      #A67CC4;
+  --persona-finisher-bg:   rgba(166,124,196,0.10);
+  --persona-finisher-b:    rgba(166,124,196,0.22);
+
+  /* Fit score tier colours */
+  --fit-strong-t:  #BFE8C7; --fit-strong-bg: #163018; --fit-strong-b: #284A2E;
+  --fit-ok-t:      #F2D39A; --fit-ok-bg:     #2B210E; --fit-ok-b:     #4A3715;
+  --fit-low-t:     #F2B1B1; --fit-low-bg:    #2A1212; --fit-low-b:    #4A2222;
+
+  /* Monologue card surface */
+  --mono-card-bg: #0F0F12;
+  --mono-card-b:  #232328;
+}
+
+/* Persona badge */
+.persona-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.persona-pill-explorer   { color: var(--persona-explorer);   background: var(--persona-explorer-bg);   border: 1px solid var(--persona-explorer-b); }
+.persona-pill-strategist { color: var(--persona-strategist); background: var(--persona-strategist-bg); border: 1px solid var(--persona-strategist-b); }
+.persona-pill-finisher   { color: var(--persona-finisher);   background: var(--persona-finisher-bg);   border: 1px solid var(--persona-finisher-b); }
+
+/* Fit score pills */
+.fit-strong { background: var(--fit-strong-bg); color: var(--fit-strong-t); border: 1px solid var(--fit-strong-b); }
+.fit-ok     { background: var(--fit-ok-bg);     color: var(--fit-ok-t);     border: 1px solid var(--fit-ok-b); }
+.fit-low    { background: var(--fit-low-bg);     color: var(--fit-low-t);     border: 1px solid var(--fit-low-b); }
+
+/* Monologue card */
+.mono-card {
+  background: var(--mono-card-bg);
+  border: 1px solid var(--mono-card-b);
+  border-radius: var(--r);
+  padding: 24px;
+}
+.mono-card-hover {
+  transition: border-color 150ms ease, background 150ms ease;
+  cursor: pointer;
+}
+.mono-card-hover:hover {
+  border-color: var(--b-strong);
+  background: var(--s2);
+}
+
+/* Step indicator dot */
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--b);
+  transition: background 200ms;
+}
+.step-dot-active  { background: var(--acc); }
+.step-dot-done    { background: var(--persona-strategist); }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
 @keyframes fade-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
