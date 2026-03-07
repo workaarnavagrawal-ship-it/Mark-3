@@ -1,11 +1,16 @@
 "use client";
+
 import { FormEvent, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [sent, setSent] = useState(false);
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -30,9 +35,7 @@ export default function AuthPage() {
       if (!res.ok) {
         const msg = data?.error || "Something went wrong sending the link.";
         if (msg.toLowerCase().includes("rate limit")) {
-          setErr(
-            "You just requested a link. Please wait 60 seconds before requesting another."
-          );
+          setErr("You just requested a link. Please wait 60 seconds before trying again.");
         } else {
           setErr(msg);
         }
@@ -46,162 +49,107 @@ export default function AuthPage() {
     }
   }
 
+  const displayError = err || urlError;
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        background: "var(--bg)",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: "360px" }}>
-        <a
-          href="/"
-          className="serif"
-          style={{
-            display: "block",
-            fontSize: "22px",
-            fontWeight: 400,
-            fontStyle: "italic",
-            color: "var(--t)",
-            textDecoration: "none",
-            marginBottom: "56px",
-          }}
-        >
-          offr
-        </a>
+    <div className="grain-overlay min-h-screen flex items-center justify-center p-6 bg-[var(--bg)]">
+      <div className="w-full max-w-[400px]">
+        {/* Logo */}
+        <Link href="/" className="no-underline block mb-14">
+          <span className="serif text-2xl font-normal italic text-[var(--t)]">
+            offr
+          </span>
+        </Link>
 
-        <h1
-          className="serif"
+        {/* Hardware Panel */}
+        <div
+          className="rounded-[20px] border border-[var(--b-panel)] bg-[var(--s1)] p-8"
           style={{
-            fontSize: "38px",
-            fontWeight: 400,
-            letterSpacing: "-0.025em",
-            color: "var(--t)",
-            marginBottom: "10px",
+            boxShadow: `
+              inset 0 1px 0 rgba(255,255,255,0.04),
+              inset 0 -1px 0 rgba(0,0,0,0.3),
+              0 4px 24px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)
+            `,
           }}
         >
-          Sign in
-        </h1>
-        <p
-          style={{
-            fontSize: "14px",
-            color: "var(--t3)",
-            marginBottom: "40px",
-            lineHeight: 1.65,
-          }}
-        >
-          Enter your email and we&apos;ll send you a one‑time sign‑in link.
-        </p>
-
-        {err && (
-          <div
-            style={{
-              marginBottom: "16px",
-              padding: "12px 16px",
-              background: "var(--rch-bg)",
-              border: "1px solid var(--rch-b)",
-              borderRadius: "10px",
-            }}
-          >
-            <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{err}</p>
+          {/* Header rail */}
+          <div className="mb-6">
+            <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--t3)]">
+              Authentication
+            </span>
           </div>
-        )}
 
-        {sent && !err && (
-          <div
-            style={{
-              marginBottom: "16px",
-              padding: "12px 16px",
-              background: "var(--safe-bg)",
-              border: "1px solid var(--safe-b)",
-              borderRadius: "10px",
-            }}
-          >
-            <p style={{ fontSize: "13px", color: "var(--safe-t)" }}>
-              Check your inbox. Click the link on this device to finish signing
-              in.
-            </p>
-          </div>
-        )}
+          <h1 className="serif text-[2rem] font-normal tracking-tight text-[var(--t)] mb-2">
+            Sign in
+          </h1>
+          <p className="text-sm text-[var(--t3)] mb-8 leading-relaxed">
+            Enter your email and we&apos;ll send a one&#8209;time sign&#8209;in link.
+          </p>
 
-        <form
-          onSubmit={onSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: "12px" }}
-        >
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            autoComplete="email"
-            style={{
-              width: "100%",
-              padding: "12px 14px",
-              borderRadius: "10px",
-              border: "1px solid var(--b-strong)",
-              background: "var(--s2)",
-              color: "var(--t)",
-              fontSize: "14px",
-            }}
-          />
+          {/* Error */}
+          {displayError && !sent && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-[var(--rch-bg)] border border-[var(--rch-b)]">
+              <p className="font-mono text-[11px] text-[var(--rch-t)]">
+                {displayError}
+              </p>
+            </div>
+          )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn"
-            style={{
-              width: "100%",
-              background: "var(--s2)",
-              border: "1px solid var(--b-strong)",
-              color: "var(--t)",
-              fontSize: "14px",
-              padding: "14px 20px",
-              transition: "all 150ms",
-              cursor: loading ? "default" : "pointer",
-            }}
-            onMouseEnter={(e) => {
-              if (!loading)
-                (e.currentTarget as HTMLElement).style.borderColor =
-                  "var(--acc)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.borderColor =
-                "var(--b-strong)";
-            }}
-          >
-            {loading ? (
-              <span
-                style={{
-                  width: "16px",
-                  height: "16px",
-                  border: "1.5px solid var(--b-strong)",
-                  borderTopColor: "var(--t2)",
-                  borderRadius: "50%",
-                  display: "inline-block",
-                  animation: "spin 0.8s linear infinite",
-                }}
-              />
-            ) : (
-              "Send magic link"
-            )}
-          </button>
-        </form>
+          {/* Success */}
+          {sent && !err && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-[var(--safe-bg)] border border-[var(--safe-b)]">
+              <p className="font-mono text-[11px] text-[var(--safe-t)]">
+                Check your inbox. Click the link on this device to finish signing in.
+              </p>
+            </div>
+          )}
 
-        <p
-          style={{
-            marginTop: "20px",
-            fontSize: "12px",
-            color: "var(--t3)",
-            textAlign: "center",
-            lineHeight: 1.6,
-          }}
-        >
-          Your data is private and secure. Only you can see your profile.
-        </p>
+          {/* Form */}
+          <form onSubmit={onSubmit} className="flex flex-col gap-3">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              className="inp"
+              autoFocus
+            />
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="
+                w-full py-4 px-6
+                rounded-xl
+                bg-[var(--acc)] text-[var(--t-inv)]
+                font-mono text-xs font-bold uppercase tracking-[0.14em]
+                transition-all duration-150
+                hover:bg-[var(--acc-h)] hover:shadow-glow
+                active:translate-y-[1px]
+                disabled:opacity-40 disabled:cursor-not-allowed
+              "
+              style={{
+                boxShadow: loading
+                  ? "none"
+                  : "0 2px 12px rgba(0,229,199,0.15), inset 0 1px 0 rgba(255,255,255,0.2)",
+              }}
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-[var(--t-inv)] border-t-transparent rounded-full animate-spin inline-block" />
+                  <span>Sending</span>
+                </span>
+              ) : (
+                "Send Magic Link"
+              )}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--t3)] leading-relaxed">
+            Your data is private and secure. Only you can see your profile.
+          </p>
+        </div>
       </div>
     </div>
   );
