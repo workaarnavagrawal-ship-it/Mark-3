@@ -2,32 +2,65 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════
+   MONOLOGUE DESIGN SYSTEM — Offr v2
+   Premium editorial + dark hardware UI
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {
-  --bg: #000000;
-  --s1: #0B0B0C;
-  --s2: #0E0E10;
-  --s3: #121216;
-  --s-hov: #16161A;
-  --b: #1F1F22;
-  --b-strong: #2A2A2F;
-  --t: #F4F1E8;
-  --t2: #B9B6AE;
-  --t3: #6E6C66;
-  --t-inv: #1A1815;
-  --acc: #E8DFC8;
-  --acc-h: #EFE7D3;
-  --safe-bg: #163018; --safe-t: #BFE8C7; --safe-b: #284A2E;
-  --tgt-bg: #2B210E;  --tgt-t:  #F2D39A;  --tgt-b:  #4A3715;
-  --rch-bg: #2A1212;  --rch-t:  #F2B1B1;  --rch-b:  #4A2222;
-  --gl-dark: rgba(18,18,22,0.55);
-  --gl-dark-b: rgba(255,255,255,0.08);
-  --gl-parch: rgba(232,223,200,0.10);
-  --gl-parch-b: rgba(232,223,200,0.18);
+  /* ── Surfaces ── */
+  --bg:       #050506;
+  --s1:       #0A0A0C;
+  --s2:       #0F0F12;
+  --s3:       #141418;
+  --s4:       #1A1A1F;
+  --s-hov:    #1E1E24;
+
+  /* ── Borders ── */
+  --b:        #1C1C22;
+  --b-strong: #2A2A32;
+  --b-panel:  #252530;
+
+  /* ── Text ── */
+  --t:        #E8E6E1;
+  --t2:       #9B9A95;
+  --t3:       #5C5B57;
+  --t-inv:    #0A0A0C;
+
+  /* ── Accent (teal/cyan) ── */
+  --acc:      #00E5C7;
+  --acc-h:    #33EEDD;
+  --acc-dim:  #00E5C720;
+  --acc-glow: #00E5C712;
+  --acc-border: #00E5C730;
+
+  /* ── Band colors ── */
+  --safe-bg: #0A1F12;  --safe-t: #4ADE80;  --safe-b: #1A3D24;
+  --tgt-bg:  #1F1A0A;  --tgt-t:  #FACC15;  --tgt-b:  #3D3415;
+  --rch-bg:  #1F0A0A;  --rch-t:  #F87171;  --rch-b:  #3D1515;
+
+  /* ── Typography ── */
   --serif: 'EB Garamond', 'Apple Garamond', Georgia, serif;
-  --sans: 'DM Sans', system-ui, sans-serif;
-  --r: 16px;
-  --ri: 12px;
+  --mono:  'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  --sans:  'DM Sans', system-ui, -apple-system, sans-serif;
+
+  /* ── Radii ── */
+  --r:    16px;
+  --r-lg: 20px;
+  --ri:   10px;
+  --r-sm: 8px;
+
+  /* ── Shadows (hardware depth) ── */
+  --shadow-panel: 0 4px 24px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-deep:  0 8px 40px rgba(0,0,0,0.6), 0 2px 4px rgba(0,0,0,0.4);
+  --shadow-glow:  0 0 40px var(--acc-glow), 0 0 80px var(--acc-glow);
+
+  /* ── Sidebar ── */
+  --sidebar-w: 240px;
+  --rail-w:    280px;
 }
+
+/* ── Reset ──────────────────────────────────────────────────── */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -36,55 +69,93 @@ html, body {
   color: var(--t);
   font-family: var(--sans);
   font-size: 15px;
-  line-height: 1.65;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-::selection { background: rgba(232,223,200,0.15); }
-::-webkit-scrollbar { width: 4px; }
+::selection { background: var(--acc-dim); color: var(--t); }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--b); border-radius: 9999px; }
-*:focus-visible { outline: 1.5px solid rgba(232,223,200,0.35); outline-offset: 2px; border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--b-strong); border-radius: 9999px; }
+*:focus-visible {
+  outline: 1.5px solid var(--acc-border);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Typography ────────────────────────────────────────────── */
 
 .serif { font-family: var(--serif) !important; }
+.mono  { font-family: var(--mono) !important; }
 
-.glass-dark {
-  background: var(--gl-dark);
-  border: 1px solid var(--gl-dark-b);
-  backdrop-filter: blur(14px) saturate(120%);
-  -webkit-backdrop-filter: blur(14px) saturate(120%);
-}
-.glass-parch {
-  background: var(--gl-parch);
-  border: 1px solid var(--gl-parch-b);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+.headline {
+  font-family: var(--serif);
+  font-size: 2.25rem;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--t);
 }
 
-.card {
-  background: var(--s1);
-  border: 1px solid var(--b);
-  border-radius: var(--r);
-  padding: 24px;
+.headline-sm {
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  color: var(--t);
 }
-.card-hover {
-  transition: border-color 150ms ease, background 150ms ease;
-  cursor: pointer;
+
+.micro-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--t3);
 }
-.card-hover:hover {
-  border-color: var(--b-strong);
-  background: var(--s2);
+
+.body-text {
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--t2);
+  line-height: 1.6;
 }
-/* Clickable link cards — use instead of onMouseEnter/onMouseLeave on <Link> */
-.link-card {
-  background: var(--s1);
-  border: 1px solid var(--b);
-  transition: border-color 150ms, background 150ms;
+
+/* ── Grain/Noise Overlay ───────────────────────────────────── */
+
+.grain-overlay::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px;
 }
-.link-card:hover {
-  border-color: var(--b-strong);
-  background: var(--s2);
+
+/* ── Spotlight Glow (one per page behind primary panel) ───── */
+
+.spotlight {
+  position: relative;
 }
+.spotlight::after {
+  content: '';
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 400px;
+  height: 200px;
+  background: radial-gradient(ellipse, var(--acc-glow) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Inputs ────────────────────────────────────────────────── */
 
 .inp {
   width: 100%;
@@ -99,9 +170,24 @@ html, body {
   transition: border-color 150ms;
   -webkit-appearance: none;
 }
-.inp:focus { border-color: var(--b-strong); }
+.inp:focus { border-color: var(--acc-border); }
 .inp::placeholder { color: var(--t3); }
 .inp option { background: var(--s2); color: var(--t); }
+
+/* ── Labels ────────────────────────────────────────────────── */
+
+.label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--t3);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────── */
 
 .btn {
   display: inline-flex;
@@ -119,54 +205,61 @@ html, body {
   white-space: nowrap;
 }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-prim { background: var(--acc); color: var(--t-inv); }
-.btn-prim:hover:not(:disabled) { background: var(--acc-h); transform: translateY(-1px); }
-.btn-prim:active:not(:disabled) { transform: translateY(0); }
-.btn-ghost { background: transparent; color: var(--t3); border: 1px solid var(--b); }
-.btn-ghost:hover:not(:disabled) { border-color: var(--b-strong); color: var(--t2); }
 
-.label {
-  font-size: 11px;
-  color: var(--t3);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  display: block;
-  margin-bottom: 8px;
+.btn-prim {
+  background: var(--acc);
+  color: var(--t-inv);
+  font-weight: 600;
 }
+.btn-prim:hover:not(:disabled) {
+  background: var(--acc-h);
+  box-shadow: 0 0 20px var(--acc-dim);
+  transform: translateY(-1px);
+}
+.btn-prim:active:not(:disabled) { transform: translateY(0); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--t3);
+  border: 1px solid var(--b);
+}
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--b-strong);
+  color: var(--t2);
+}
+
+/* ── Pills / Chips ─────────────────────────────────────────── */
+
 .pill {
   display: inline-flex;
   align-items: center;
   border-radius: 9999px;
   padding: 3px 11px;
-  font-size: 11px;
-  letter-spacing: 0.03em;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .pill-safe   { background: var(--safe-bg); color: var(--safe-t); border: 1px solid var(--safe-b); }
 .pill-target { background: var(--tgt-bg);  color: var(--tgt-t);  border: 1px solid var(--tgt-b); }
 .pill-reach  { background: var(--rch-bg);  color: var(--rch-t);  border: 1px solid var(--rch-b); }
 
-.tog {
-  padding: 9px 18px;
-  border-radius: var(--ri);
-  border: 1px solid var(--b);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 150ms;
-  background: transparent;
-  color: var(--t3);
-  font-family: var(--sans);
-}
-.tog:hover { border-color: var(--b-strong); color: var(--t2); }
+/* ── Navigation ────────────────────────────────────────────── */
 
-/* Sidebar nav links */
 .nav-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 9px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   color: var(--t3);
   text-decoration: none;
-  font-size: 13px;
-  font-weight: 400;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   transition: background 150ms, color 150ms;
 }
 .nav-link:hover {
@@ -174,44 +267,70 @@ html, body {
   color: var(--t2);
 }
 .nav-link.nav-active {
-  background: var(--acc);
-  color: var(--t-inv);
-  font-weight: 500;
+  background: var(--acc-dim);
+  color: var(--acc);
 }
 .nav-link.nav-active:hover {
-  background: var(--acc);
-  color: var(--t-inv);
+  background: var(--acc-dim);
+  color: var(--acc);
 }
 
-/* Dashed "add choice" link used in Strategy + Tracker */
-.link-dashed-add {
-  border-color: var(--b);
-  color: var(--t3);
-  text-decoration: none;
+/* ── Cards (compat) ────────────────────────────────────────── */
+
+.card {
+  background: var(--s1);
+  border: 1px solid var(--b);
+  border-radius: var(--r);
+  padding: 24px;
+}
+.card-hover {
+  transition: border-color 150ms ease, background 150ms ease;
+  cursor: pointer;
+}
+.card-hover:hover {
+  border-color: var(--b-strong);
+  background: var(--s2);
+}
+
+/* ── Toggle ────────────────────────────────────────────────── */
+
+.tog {
+  padding: 7px 14px;
+  border-radius: var(--ri);
+  border: 1px solid var(--b);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
   transition: all 150ms;
-}
-.link-dashed-add:hover { border-color: var(--b-strong); color: var(--t2); }
-
-/* "Check my chances →" text link in Explore suggested cards */
-.link-chances-text {
+  background: transparent;
   color: var(--t3);
-  text-decoration: none;
-  transition: color 150ms;
 }
-.link-chances-text:hover { color: var(--t); }
+.tog:hover { border-color: var(--b-strong); color: var(--t2); }
+.tog-active {
+  background: var(--acc-dim);
+  color: var(--acc);
+  border-color: var(--acc-border);
+  font-weight: 600;
+}
 
-/* "Check my chances →" pill link in Explore course list */
-.link-chances-pill {
-  border-color: var(--b);
-  color: var(--t3);
-  text-decoration: none;
-  transition: all 150ms;
-}
-.link-chances-pill:hover { border-color: var(--b-strong); color: var(--t); }
-.tog-active { background: var(--acc); color: var(--t-inv); border-color: var(--acc); font-weight: 500; }
+/* ── Animations ────────────────────────────────────────────── */
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
 @keyframes fade-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+@keyframes slide-up { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+@keyframes slide-right { from { opacity:0; transform:translateX(100%); } to { opacity:1; transform:translateX(0); } }
+@keyframes glow-pulse { 0%,100%{ box-shadow: 0 0 20px var(--acc-glow); } 50%{ box-shadow: 0 0 40px var(--acc-dim); } }
 
 .fade-in { animation: fade-in 250ms ease forwards; }
+.slide-up { animation: slide-up 350ms ease forwards; }
+
+/* ── Dot Grid (optional behind hero modules) ───────────────── */
+
+.dot-grid {
+  background-image: radial-gradient(circle, var(--b) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
