@@ -184,6 +184,167 @@ export interface OfferAssessResponse {
 
 // ── Persona ──────────────────────────────────────────────────────
 export type Persona = "explorer" | "optimizer" | "verifier";
+export type PersonaV2 = "EXPLORER" | "STRATEGIST" | "FINISHER";
+
+// ── V2 Data Shapes (Monologue rebuild) ──────────────────────────
+
+export interface ProfileV2 {
+  id: string;
+  user_id: string;
+  name: string;
+  persona: PersonaV2 | null;
+  curriculum: "IB" | "ALEVEL";
+  home_or_intl: "HOME" | "INTL";
+  predicted_summary: string | null;
+  ib_subject_total: number | null;
+  ib_bonus_points: number | null;
+  ib_total_points: number | null;
+  alevel_predicted: ALevelItem[] | null;
+  interest_tags: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Offering {
+  course_id: string;
+  uni_code: string;
+  uni_name: string;
+  faculty: string;
+  course_name: string;
+  degree_type: string;
+  course_url: string;
+  curriculum_supported?: string;
+  typical_offer: string;
+  min_requirements: string;
+  min_points_home?: number | null;
+  intl_buffer_points?: number | null;
+  required_subjects: string;
+  recommended_subjects: string;
+  ps_expected_signals: string;
+  estimated_annual_cost_international: number | null;
+  notes: string;
+}
+
+export interface CourseGroup {
+  course_group_key: string;
+  course_group_name: string;
+  offerings_count: number;
+  offerings_preview: string[];  // top 3 uni names
+  representative_faculty?: string;
+}
+
+export interface CourseGroupDetail extends CourseGroup {
+  offerings: Offering[];
+}
+
+export interface MySpaceRun {
+  id: string;
+  user_id: string;
+  prefs: ExplorerPrefs;
+  results_snapshot: RecommendResult[] | null;
+  created_at: string;
+}
+
+export interface ExplorerPrefs {
+  optimize_for: "PRESTIGE" | "BUDGET" | "BALANCE";
+  vibe: string[];
+  location: string[];
+  interests: string[];
+  free_text?: string;
+}
+
+export interface RecommendResult {
+  course_id: string;
+  uni_name: string;
+  course_name: string;
+  degree_type: string;
+  faculty: string;
+  fit_score: number;
+  reasons: string[];
+  typical_offer?: string;
+  estimated_annual_cost_international?: number | null;
+}
+
+export interface ShortlistItem {
+  id: string;
+  user_id: string;
+  item_type: "COURSE_GROUP" | "OFFERING";
+  course_group_key?: string;
+  course_id?: string;
+  course_name: string;
+  university_name?: string;
+  reason?: string;
+  fit_score?: number;
+  created_at: string;
+}
+
+export interface StrategyChoice {
+  id: string;
+  user_id: string;
+  slot: number;
+  course_id: string;
+  university_name: string;
+  course_name: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PSDocument {
+  user_id: string;
+  mode: "UCAS_2026" | "FREEFORM";
+  q1?: string;
+  q2?: string;
+  q3?: string;
+  freeform?: string;
+  last_analyzed_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PSAnalysisResult {
+  id: string;
+  user_id: string;
+  target_course: string;
+  target_university?: string;
+  ps_band: string;
+  score: number;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AssessmentV2 {
+  id: string;
+  user_id: string;
+  course_id: string;
+  university_name: string;
+  course_name: string;
+  band: "SAFE" | "TARGET" | "REACH";
+  chance: number;
+  fit_score?: number;
+  grade_match?: number;
+  ps_impact?: number;
+  reasoning: {
+    bullets: string[];
+    grade_detail?: string;
+    subject_detail?: string;
+  };
+  created_at: string;
+}
+
+// ── Deadline config (no hardcoded dates) ────────────────────────
+export interface DeadlineConfig {
+  early_deadline_label: string;
+  main_deadline_label: string;
+  early_applies_to: string[];  // course_id prefixes or keywords
+}
+
+// ── University with offering count ──────────────────────────────
+export interface UniversityWithCount {
+  uni_code: string;
+  uni_name: string;
+  offering_count: number;
+}
 
 // ── Strategy / Suggest ───────────────────────────────────────────
 export interface SuggestRequest {

@@ -1,15 +1,47 @@
 "use client";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { upsertProfile, upsertSubjects } from "@/lib/profile";
-import { savePersona } from "@/lib/persona";
-import type { Curriculum, HomeOrIntl, Persona, SubjectEntry, YearGroup } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import type { PersonaV2 } from "@/lib/types";
 
-const INTERESTS = ["Economics","Law","Computer Science","Medicine","Engineering","Mathematics","History","Philosophy","Politics","Psychology","Business","Architecture","Biology","Chemistry","Physics","Literature","Art & Design","Music","Geography","Sociology","Environmental Science"];
-const IB_SUBJECTS = ["Math AA HL","Math AI HL","Math AA SL","Math AI SL","Economics","Business Management","History","Geography","Psychology","Philosophy","English A Lang & Lit","English A Literature","English B","Physics","Chemistry","Biology","Computer Science","French B","Spanish B","Spanish ab initio","French ab initio","Global Politics","Design Technology","Visual Arts","Theatre","Music"];
-const AL_SUBJECTS = ["Mathematics","Further Mathematics","Economics","Business","History","Geography","Politics","Psychology","Sociology","Philosophy","English Literature","English Language","Physics","Chemistry","Biology","Computer Science","Art","Design & Technology","Media Studies","Law","Statistics"];
-const IB_GRADES = [7,6,5,4,3,2,1];
-const A_GRADES = ["A*","A","B","C","D","E"];
+const INTERESTS = [
+  "Economics", "Law", "Computer Science", "Medicine", "Engineering",
+  "Mathematics", "History", "Philosophy", "Politics", "Psychology",
+  "Business", "Architecture", "Biology", "Chemistry", "Physics",
+  "Literature", "Art & Design", "Music", "Geography", "Sociology",
+  "Environmental Science", "Linguistics", "Classics", "Anthropology",
+];
+
+const PERSONAS: {
+  id: PersonaV2;
+  name: string;
+  title: string;
+  quote: string;
+  description: string;
+}[] = [
+  {
+    id: "EXPLORER",
+    name: "Skinny Pete",
+    title: "The Explorer",
+    quote: "\"I don't even know what I want to study, yo.\"",
+    description: "You have interests but no clear course in mind. We'll run clarity sessions to surface courses and universities that actually fit you.",
+  },
+  {
+    id: "STRATEGIST",
+    name: "Jesse Pinkman",
+    title: "The Strategist",
+    quote: "\"Yeah, science! ...but like, which science?\"",
+    description: "You know the rough direction. You need a plan: 5 smart choices, a strong PS, and strategic pivots if things shift.",
+  },
+  {
+    id: "FINISHER",
+    name: "Walter White",
+    title: "The Finisher",
+    quote: "\"I am the one who knocks.\"",
+    description: "You're basically ready to submit. You need final checks: course fit, PS analysis, and honest offer chances before you lock it in.",
+  },
+];
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -17,163 +49,480 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
-  const [persona, setPersona] = useState<Persona>("verifier");
+  // Step 1: Name
   const [name, setName] = useState("");
-  const [year, setYear] = useState<YearGroup>("12");
-  const [curriculum, setCurriculum] = useState<Curriculum>("IB");
-  const [homeOrIntl, setHomeOrIntl] = useState<HomeOrIntl>("intl");
-  const [corePoints, setCorePoints] = useState(2);
+
+  // Step 2: Curriculum + grades + HOME/INTL
+  const [curriculum, setCurriculum] = useState<"IB" | "ALEVEL">("IB");
+  const [homeOrIntl, setHomeOrIntl] = useState<"HOME" | "INTL">("INTL");
+
+  // IB grades
+  const [ibMode, setIbMode] = useState<"subjects" | "total">("total");
+  const [ibSubjectTotal, setIbSubjectTotal] = useState<number | null>(null);
+  const [ibBonusPoints, setIbBonusPoints] = useState<number | null>(null);
+  const [ibTotalOnly, setIbTotalOnly] = useState<number | null>(null);
+  const [showBonusFollowup, setShowBonusFollowup] = useState(false);
+  const [knowsBonus, setKnowsBonus] = useState<boolean | null>(null);
+
+  // A-Level grades
+  const [alevelSummary, setAlevelSummary] = useState("");
+
+  // Step 3: Interests
   const [interests, setInterests] = useState<string[]>([]);
-  const [hl, setHl] = useState<SubjectEntry[]>([
-    { subject: "Math AA HL", level: "HL", predicted_grade: "6" },
-    { subject: "Economics", level: "HL", predicted_grade: "6" },
-    { subject: "History", level: "HL", predicted_grade: "6" },
-  ]);
-  const [sl, setSl] = useState<SubjectEntry[]>([
-    { subject: "English A Lang & Lit", level: "SL", predicted_grade: "6" },
-    { subject: "Physics", level: "SL", predicted_grade: "6" },
-    { subject: "Spanish B", level: "SL", predicted_grade: "6" },
-  ]);
-  const [al, setAl] = useState<SubjectEntry[]>([
-    { subject: "Mathematics", level: "A_LEVEL", predicted_grade: "A*" },
-    { subject: "Economics", level: "A_LEVEL", predicted_grade: "A" },
-    { subject: "History", level: "A_LEVEL", predicted_grade: "A" },
-  ]);
-  const [psFormat, setPsFormat] = useState<"UCAS_3Q"|"LEGACY">("UCAS_3Q");
-  const [q1, setQ1] = useState("");
-  const [q2, setQ2] = useState("");
-  const [q3, setQ3] = useState("");
-  const [statement, setStatement] = useState("");
+  const [curiosity, setCuriosity] = useState("");
 
-  const toggleInterest = (i: string) => setInterests(p => p.includes(i) ? p.filter(x => x !== i) : p.length < 3 ? [...p, i] : p);
+  // Step 4: Persona
+  const [persona, setPersona] = useState<PersonaV2 | null>(null);
 
-  async function finish() {
-    setErr(""); setSaving(true);
-    try {
-      savePersona(persona);
-      const subjects = curriculum === "IB" ? [...hl, ...sl] : al;
-      const profile = await upsertProfile({ name, year, curriculum, home_or_intl: homeOrIntl, interests, core_points: curriculum === "IB" ? corePoints : undefined, ps_format: psFormat, ps_q1: q1, ps_q2: q2, ps_q3: q3, ps_statement: statement });
-      if (!profile) throw new Error("Failed to save");
-      await upsertSubjects(profile.id, subjects);
-      const dest = persona === "explorer" ? "/dashboard/explore" : persona === "optimizer" ? "/dashboard/strategy" : "/dashboard/assess";
-      router.push(dest);
-    } catch (e: any) { setErr(e.message); }
-    finally { setSaving(false); }
-  }
-
-  const TOTAL = 6;
+  const TOTAL = 4;
   const progress = (step / TOTAL) * 100;
 
-  const s: React.CSSProperties = { background: "var(--s2)", border: "1px solid var(--b)", borderRadius: "var(--ri)", padding: "11px 14px", fontSize: "14px", color: "var(--t)", fontFamily: "var(--font-dm, var(--sans))", outline: "none", width: "100%", transition: "border-color 150ms" };
+  // Computed IB total
+  const ibTotal = ibMode === "subjects"
+    ? (ibSubjectTotal ?? 0) + (ibBonusPoints ?? 0)
+    : ibTotalOnly ?? 0;
 
-  function tog(active: boolean) {
-    return { padding: "10px 18px", borderRadius: "var(--ri)", border: `1px solid ${active ? "var(--acc)" : "var(--b)"}`, fontSize: "14px", cursor: "pointer", transition: "all 150ms", background: active ? "var(--acc)" : "transparent", color: active ? "var(--t-inv)" : "var(--t3)", fontFamily: "var(--font-dm, var(--sans))", fontWeight: active ? 500 : 400 } as React.CSSProperties;
+  const toggleInterest = (tag: string) => {
+    setInterests((prev) =>
+      prev.includes(tag)
+        ? prev.filter((t) => t !== tag)
+        : prev.length < 6
+          ? [...prev, tag]
+          : prev
+    );
+  };
+
+  function canAdvance(): boolean {
+    if (step === 1) return name.trim().length > 0;
+    if (step === 2) {
+      if (curriculum === "IB") {
+        if (ibMode === "subjects") return ibSubjectTotal !== null && ibSubjectTotal >= 0;
+        return ibTotalOnly !== null && ibTotalOnly >= 24;
+      }
+      return alevelSummary.trim().length > 0;
+    }
+    if (step === 3) return interests.length >= 3;
+    if (step === 4) return persona !== null;
+    return true;
+  }
+
+  async function finish() {
+    if (!persona) return;
+    setErr("");
+    setSaving(true);
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      // Compute final IB values
+      let finalSubjectTotal: number | null = null;
+      let finalBonusPoints: number | null = null;
+      let finalTotalPoints: number | null = null;
+      let predictedSummary: string | null = null;
+
+      if (curriculum === "IB") {
+        if (ibMode === "subjects") {
+          finalSubjectTotal = ibSubjectTotal;
+          finalBonusPoints = ibBonusPoints;
+          finalTotalPoints = (finalSubjectTotal ?? 0) + (finalBonusPoints ?? 0);
+        } else {
+          finalTotalPoints = ibTotalOnly;
+          finalBonusPoints = knowsBonus ? ibBonusPoints : null;
+          if (finalTotalPoints !== null && finalBonusPoints !== null) {
+            finalSubjectTotal = finalTotalPoints - finalBonusPoints;
+          }
+        }
+        predictedSummary = `IB ${finalTotalPoints ?? "?"}/45`;
+      } else {
+        predictedSummary = alevelSummary.trim();
+      }
+
+      const profileData = {
+        user_id: user.id,
+        name: name.trim(),
+        persona,
+        curriculum,
+        home_or_intl: homeOrIntl,
+        predicted_summary: predictedSummary,
+        ib_subject_total: curriculum === "IB" ? finalSubjectTotal : null,
+        ib_bonus_points: curriculum === "IB" ? finalBonusPoints : null,
+        ib_total_points: curriculum === "IB" ? finalTotalPoints : null,
+        alevel_predicted: curriculum === "ALEVEL" ? [{ summary: alevelSummary.trim() }] : null,
+        interest_tags: interests,
+        interests: interests.slice(0, 3), // compat with old column
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from("profiles")
+        .upsert(profileData, { onConflict: "user_id" });
+
+      if (error) throw error;
+
+      router.push("/my-space");
+    } catch (e: any) {
+      setErr(e?.message || "Failed to save profile.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", background: "var(--bg)" }}>
-      <div style={{ width: "100%", maxWidth: "520px" }}>
-        <div className="serif" style={{ fontSize: "22px", fontStyle: "italic", marginBottom: "32px", color: "var(--t)" }}>offr</div>
+    <div className="grain-overlay min-h-screen flex flex-col items-center justify-center p-6 md:p-10 bg-[var(--bg)]">
+      <div className="w-full max-w-[520px]">
+        {/* Logo */}
+        <span className="serif text-2xl font-normal italic text-[var(--t)] block mb-8">
+          offr
+        </span>
 
-        {/* Progress */}
-        <div style={{ height: "2px", background: "var(--s3)", borderRadius: "2px", marginBottom: "36px", overflow: "hidden" }}>
-          <div style={{ height: "100%", background: "var(--acc)", borderRadius: "2px", width: `${progress}%`, transition: "width 400ms ease" }} />
+        {/* Progress bar */}
+        <div className="h-[2px] bg-[var(--s3)] rounded-full mb-10 overflow-hidden">
+          <div
+            className="h-full bg-[var(--acc)] rounded-full transition-all duration-400 ease-out"
+            style={{ width: `${progress}%` }}
+          />
         </div>
 
-        {/* Step 0 — persona */}
+        {/* ── STEP 1: NAME ── */}
         {step === 1 && (
           <div className="fade-in">
-            <p className="label">Step 1 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "10px" }}>What do you need?</h1>
-            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "32px", lineHeight: 1.65 }}>We&apos;ll shape your experience around this.</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {([
-                { id: "explorer" as Persona, label: "I'm exploring", sub: "Interests but no course in mind yet" },
-                { id: "optimizer" as Persona, label: "I have a rough plan", sub: "Know roughly what I want, need smarter options" },
-                { id: "verifier" as Persona, label: "I need honest odds", sub: "Know what I'm applying for, need real chances" },
-              ]).map(opt => (
-                <button key={opt.id} onClick={() => setPersona(opt.id)} style={{
-                  ...tog(persona === opt.id),
-                  display: "flex", flexDirection: "column", alignItems: "flex-start",
-                  padding: "16px 20px", textAlign: "left", width: "100%",
-                }}>
-                  <span style={{ fontSize: "15px", fontWeight: 500, marginBottom: "2px" }}>{opt.label}</span>
-                  <span style={{ fontSize: "12px", opacity: 0.7, fontWeight: 400 }}>{opt.sub}</span>
-                </button>
-              ))}
+            <span className="micro-label mb-4 block">Step 1 of {TOTAL}</span>
+            <h1 className="headline mb-3">What&apos;s your name?</h1>
+            <p className="body-text mb-8">We&apos;ll use this to personalise your experience.</p>
+
+            <div
+              className="rounded-[20px] border border-[var(--b-panel)] bg-[var(--s1)] p-6"
+              style={{
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 rgba(0,0,0,0.3), var(--shadow-panel)",
+              }}
+            >
+              <input
+                className="inp"
+                placeholder="First name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => e.key === "Enter" && canAdvance() && setStep(2)}
+              />
             </div>
           </div>
         )}
 
-        {/* Step 1 — name */}
+        {/* ── STEP 2: CURRICULUM + GRADES + HOME/INTL ── */}
         {step === 2 && (
           <div className="fade-in">
-            <p className="label">Step 2 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "32px" }}>What&apos;s your name?</h1>
-            <input className="inp" placeholder="First name" value={name} onChange={e => setName(e.target.value)} autoFocus
-              onKeyDown={e => e.key === "Enter" && name.trim() && setStep(3)} />
-          </div>
-        )}
+            <span className="micro-label mb-4 block">Step 2 of {TOTAL}</span>
+            <h1 className="headline mb-3">Your academics</h1>
+            <p className="body-text mb-8">Curriculum, predicted grades, and student type.</p>
 
-        {/* Step 2 — situation */}
-        {step === 3 && (
-          <div className="fade-in">
-            <p className="label">Step 3 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "32px" }}>Your situation</h1>
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div
+              className="rounded-[20px] border border-[var(--b-panel)] bg-[var(--s1)] p-6 flex flex-col gap-6"
+              style={{
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 rgba(0,0,0,0.3), var(--shadow-panel)",
+              }}
+            >
+              {/* Curriculum */}
               <div>
-                <p className="label">Year group</p>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  {(["11","12"] as YearGroup[]).map(y => <button key={y} onClick={() => setYear(y)} style={tog(year === y)}>Year {y}</button>)}
+                <span className="micro-label mb-2 block">Curriculum</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCurriculum("IB")}
+                    className={`tog ${curriculum === "IB" ? "tog-active" : ""}`}
+                  >
+                    IB Diploma
+                  </button>
+                  <button
+                    onClick={() => setCurriculum("ALEVEL")}
+                    className={`tog ${curriculum === "ALEVEL" ? "tog-active" : ""}`}
+                  >
+                    A-Levels
+                  </button>
                 </div>
               </div>
+
+              {/* Student type */}
               <div>
-                <p className="label">Curriculum</p>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button onClick={() => setCurriculum("IB")} style={tog(curriculum === "IB")}>IB Diploma</button>
-                  <button onClick={() => setCurriculum("A_LEVELS")} style={tog(curriculum === "A_LEVELS")}>A Levels</button>
+                <span className="micro-label mb-2 block">Student Type</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setHomeOrIntl("INTL")}
+                    className={`tog ${homeOrIntl === "INTL" ? "tog-active" : ""}`}
+                  >
+                    International
+                  </button>
+                  <button
+                    onClick={() => setHomeOrIntl("HOME")}
+                    className={`tog ${homeOrIntl === "HOME" ? "tog-active" : ""}`}
+                  >
+                    UK / Home
+                  </button>
                 </div>
               </div>
-              <div>
-                <p className="label">Student type</p>
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <button onClick={() => setHomeOrIntl("intl")} style={tog(homeOrIntl === "intl")}>International</button>
-                  <button onClick={() => setHomeOrIntl("home")} style={tog(homeOrIntl === "home")}>UK / Domestic</button>
-                </div>
-              </div>
+
+              {/* IB Grades */}
               {curriculum === "IB" && (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <span className="micro-label mb-2 block">Predicted Grades</span>
+                    <div className="flex gap-2 mb-4">
+                      <button
+                        onClick={() => setIbMode("total")}
+                        className={`tog ${ibMode === "total" ? "tog-active" : ""}`}
+                      >
+                        I know my total
+                      </button>
+                      <button
+                        onClick={() => setIbMode("subjects")}
+                        className={`tog ${ibMode === "subjects" ? "tog-active" : ""}`}
+                      >
+                        Subject breakdown
+                      </button>
+                    </div>
+                  </div>
+
+                  {ibMode === "total" ? (
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <span className="micro-label mb-2 block">Total Predicted (24–45)</span>
+                        <input
+                          type="number"
+                          className="inp"
+                          min={24}
+                          max={45}
+                          placeholder="e.g. 38"
+                          value={ibTotalOnly ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value ? parseInt(e.target.value) : null;
+                            setIbTotalOnly(v);
+                            if (v && v >= 24) setShowBonusFollowup(true);
+                          }}
+                        />
+                      </div>
+
+                      {showBonusFollowup && ibTotalOnly && ibTotalOnly >= 24 && (
+                        <div className="fade-in">
+                          <span className="micro-label mb-2 block">Do you know your bonus points (EE/TOK)?</span>
+                          <div className="flex gap-2 mb-3">
+                            <button
+                              onClick={() => setKnowsBonus(true)}
+                              className={`tog ${knowsBonus === true ? "tog-active" : ""}`}
+                            >
+                              Yes
+                            </button>
+                            <button
+                              onClick={() => { setKnowsBonus(false); setIbBonusPoints(null); }}
+                              className={`tog ${knowsBonus === false ? "tog-active" : ""}`}
+                            >
+                              Not sure
+                            </button>
+                          </div>
+                          {knowsBonus && (
+                            <div className="fade-in">
+                              <span className="micro-label mb-2 block">Bonus Points (0–3)</span>
+                              <select
+                                className="inp"
+                                value={ibBonusPoints ?? ""}
+                                onChange={(e) => setIbBonusPoints(e.target.value ? parseInt(e.target.value) : null)}
+                              >
+                                <option value="">Select</option>
+                                {[0, 1, 2, 3].map((n) => (
+                                  <option key={n} value={n}>
+                                    {n} point{n !== 1 ? "s" : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {ibTotalOnly && ibTotalOnly >= 24 && (
+                        <div className="mt-1 font-mono text-xs text-[var(--t3)]">
+                          Total: <span className="text-[var(--acc)] font-semibold">{ibTotalOnly}</span>/45
+                          {knowsBonus && ibBonusPoints !== null && (
+                            <span> (subjects: {ibTotalOnly - ibBonusPoints} + bonus: {ibBonusPoints})</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-4">
+                      <div>
+                        <span className="micro-label mb-2 block">Subject Total (0–42)</span>
+                        <input
+                          type="number"
+                          className="inp"
+                          min={0}
+                          max={42}
+                          placeholder="e.g. 36"
+                          value={ibSubjectTotal ?? ""}
+                          onChange={(e) => setIbSubjectTotal(e.target.value ? parseInt(e.target.value) : null)}
+                        />
+                      </div>
+                      <div>
+                        <span className="micro-label mb-2 block">Bonus Points — EE/TOK (0–3)</span>
+                        <select
+                          className="inp"
+                          value={ibBonusPoints ?? ""}
+                          onChange={(e) => setIbBonusPoints(e.target.value ? parseInt(e.target.value) : null)}
+                        >
+                          <option value="">Select</option>
+                          {[0, 1, 2, 3].map((n) => (
+                            <option key={n} value={n}>
+                              {n} point{n !== 1 ? "s" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="font-mono text-xs text-[var(--t3)]">
+                        Total: <span className="text-[var(--acc)] font-semibold">{ibTotal}</span>/45
+                        {ibSubjectTotal !== null && (
+                          <span> (subjects: {ibSubjectTotal} + bonus: {ibBonusPoints ?? 0})</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* A-Level Grades */}
+              {curriculum === "ALEVEL" && (
                 <div>
-                  <p className="label">Core points (EE + TOK)</p>
-                  <select style={s} value={corePoints} onChange={e => setCorePoints(Number(e.target.value))}>
-                    {[0,1,2,3].map(c => <option key={c} value={c}>{c} point{c !== 1 ? "s" : ""}</option>)}
-                  </select>
+                  <span className="micro-label mb-2 block">Predicted Grades</span>
+                  <input
+                    className="inp"
+                    placeholder="e.g. A*AA or Maths A*, Economics A, History A"
+                    value={alevelSummary}
+                    onChange={(e) => setAlevelSummary(e.target.value)}
+                  />
+                  <p className="font-mono text-[9px] text-[var(--t3)] mt-2 uppercase tracking-[0.1em]">
+                    You can add detailed subject breakdowns later in your profile.
+                  </p>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Step 3 — interests */}
+        {/* ── STEP 3: INTERESTS ── */}
+        {step === 3 && (
+          <div className="fade-in">
+            <span className="micro-label mb-4 block">Step 3 of {TOTAL}</span>
+            <h1 className="headline mb-3">What interests you?</h1>
+            <p className="body-text mb-8">
+              Pick 3–6 tags. These power your recommendations.
+            </p>
+
+            <div
+              className="rounded-[20px] border border-[var(--b-panel)] bg-[var(--s1)] p-6"
+              style={{
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 rgba(0,0,0,0.3), var(--shadow-panel)",
+              }}
+            >
+              <div className="flex flex-wrap gap-2 mb-6">
+                {INTERESTS.map((tag) => {
+                  const active = interests.includes(tag);
+                  const maxed = interests.length >= 6 && !active;
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => toggleInterest(tag)}
+                      disabled={maxed}
+                      className={`
+                        px-4 py-2 rounded-full
+                        font-mono text-[10px] font-medium uppercase tracking-[0.1em]
+                        transition-all duration-150 border
+                        ${active
+                          ? "border-[var(--acc-border)] bg-[var(--acc-dim)] text-[var(--acc)]"
+                          : "border-[var(--b)] bg-transparent text-[var(--t3)] hover:border-[var(--b-strong)] hover:text-[var(--t2)]"
+                        }
+                        ${maxed ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}
+                      `}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="font-mono text-[10px] text-[var(--t3)] uppercase tracking-[0.1em] mb-4">
+                Selected: {interests.length}/6
+                {interests.length < 3 && (
+                  <span className="text-[var(--rch-t)]"> — pick at least 3</span>
+                )}
+              </div>
+
+              <div>
+                <span className="micro-label mb-2 block">Anything else? (optional)</span>
+                <input
+                  className="inp"
+                  placeholder="e.g. I'm fascinated by behavioural economics and game theory"
+                  value={curiosity}
+                  onChange={(e) => setCuriosity(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP 4: PERSONA (Breaking Bad) ── */}
         {step === 4 && (
           <div className="fade-in">
-            <p className="label">Step 4 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>Interests</h1>
-            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Pick up to 3. Used to personalise your explore page.</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              {INTERESTS.map(i => {
-                const active = interests.includes(i);
-                const maxed = interests.length >= 3 && !active;
+            <span className="micro-label mb-4 block">Step 4 of {TOTAL}</span>
+            <h1 className="headline mb-3">Pick your mode</h1>
+            <p className="body-text mb-8">
+              This shapes your dashboard. You can switch anytime.
+            </p>
+
+            <div className="flex flex-col gap-4">
+              {PERSONAS.map((p) => {
+                const active = persona === p.id;
                 return (
-                  <button key={i} onClick={() => toggleInterest(i)} disabled={maxed} style={{
-                    padding: "7px 14px", borderRadius: "9999px",
-                    border: `1px solid ${active ? "var(--acc)" : "var(--b)"}`,
-                    background: active ? "var(--acc)" : "transparent",
-                    color: active ? "var(--t-inv)" : "var(--t3)",
-                    fontSize: "13px", cursor: maxed ? "not-allowed" : "pointer",
-                    opacity: maxed ? 0.35 : 1, transition: "all 150ms",
-                    fontFamily: "var(--font-dm, var(--sans))",
-                  }}>
-                    {i}
+                  <button
+                    key={p.id}
+                    onClick={() => setPersona(p.id)}
+                    className={`
+                      w-full text-left rounded-[20px] border p-6
+                      transition-all duration-200
+                      ${active
+                        ? "border-[var(--acc-border)] bg-[var(--s1)]"
+                        : "border-[var(--b)] bg-[var(--s1)] hover:border-[var(--b-strong)]"
+                      }
+                    `}
+                    style={{
+                      boxShadow: active
+                        ? "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 rgba(0,0,0,0.3), 0 0 30px rgba(0,229,199,0.07)"
+                        : "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 rgba(0,0,0,0.3), var(--shadow-panel)",
+                    }}
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <span className={`
+                          font-mono text-[10px] font-bold uppercase tracking-[0.14em]
+                          ${active ? "text-[var(--acc)]" : "text-[var(--t3)]"}
+                        `}>
+                          {p.name}
+                        </span>
+                        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--t3)]">
+                          / {p.title}
+                        </span>
+                      </div>
+                      {active && (
+                        <span className="w-3 h-3 rounded-full bg-[var(--acc)]" />
+                      )}
+                    </div>
+
+                    {/* Quote */}
+                    <p className="serif text-lg italic text-[var(--t)] mb-3">
+                      {p.quote}
+                    </p>
+
+                    {/* Description */}
+                    <p className="text-sm text-[var(--t2)] leading-relaxed">
+                      {p.description}
+                    </p>
                   </button>
                 );
               })}
@@ -181,85 +530,79 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 4 — grades */}
-        {step === 5 && (
-          <div className="fade-in">
-            <p className="label">Step 5 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>Predicted grades</h1>
-            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px" }}>These pre-fill every assessment automatically.</p>
-            {curriculum === "IB" ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                <div>
-                  <p className="label">HL subjects</p>
-                  {hl.map((row, i) => (
-                    <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: "8px", marginBottom: "8px" }}>
-                      <select style={s} value={row.subject} onChange={e => setHl(p => p.map((x,idx) => idx===i ? {...x, subject: e.target.value} : x))}>{IB_SUBJECTS.map(sub => <option key={sub}>{sub}</option>)}</select>
-                      <select style={s} value={row.predicted_grade} onChange={e => setHl(p => p.map((x,idx) => idx===i ? {...x, predicted_grade: e.target.value} : x))}>{IB_GRADES.map(g => <option key={g}>{g}</option>)}</select>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <p className="label">SL subjects</p>
-                  {sl.map((row, i) => (
-                    <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: "8px", marginBottom: "8px" }}>
-                      <select style={s} value={row.subject} onChange={e => setSl(p => p.map((x,idx) => idx===i ? {...x, subject: e.target.value} : x))}>{IB_SUBJECTS.map(sub => <option key={sub}>{sub}</option>)}</select>
-                      <select style={s} value={row.predicted_grade} onChange={e => setSl(p => p.map((x,idx) => idx===i ? {...x, predicted_grade: e.target.value} : x))}>{IB_GRADES.map(g => <option key={g}>{g}</option>)}</select>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <p className="label">A Level grades</p>
-                {al.map((row, i) => (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: "8px", marginBottom: "8px" }}>
-                    <select style={s} value={row.subject} onChange={e => setAl(p => p.map((x,idx) => idx===i ? {...x, subject: e.target.value} : x))}>{AL_SUBJECTS.map(sub => <option key={sub}>{sub}</option>)}</select>
-                    <select style={s} value={row.predicted_grade} onChange={e => setAl(p => p.map((x,idx) => idx===i ? {...x, predicted_grade: e.target.value} : x))}>{A_GRADES.map(g => <option key={g}>{g}</option>)}</select>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Error */}
+        {err && (
+          <div className="mt-4 px-4 py-3 rounded-xl bg-[var(--rch-bg)] border border-[var(--rch-b)]">
+            <p className="font-mono text-[11px] text-[var(--rch-t)]">{err}</p>
           </div>
         )}
 
-        {/* Step 5 — PS */}
-        {step === 6 && (
-          <div className="fade-in">
-            <p className="label">Step 6 of {TOTAL}</p>
-            <h1 className="serif" style={{ fontSize: "36px", fontWeight: 400, color: "var(--t)", marginBottom: "8px" }}>Personal statement</h1>
-            <p style={{ fontSize: "14px", color: "var(--t3)", marginBottom: "24px", lineHeight: 1.65 }}>Optional — improves prediction accuracy. You can add this later.</p>
-            <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-              <button onClick={() => setPsFormat("UCAS_3Q")} style={tog(psFormat === "UCAS_3Q")}>UCAS 3 questions</button>
-              <button onClick={() => setPsFormat("LEGACY")} style={tog(psFormat === "LEGACY")}>Single text</button>
-            </div>
-            {psFormat === "UCAS_3Q" ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                {[{label:"Q1 — Why this course?",val:q1,set:setQ1},{label:"Q2 — Academic preparation",val:q2,set:setQ2},{label:"Q3 — Supercurricular & values",val:q3,set:setQ3}].map(({label,val,set}) => (
-                  <div key={label}>
-                    <p className="label">{label}</p>
-                    <textarea value={val} onChange={e => set(e.target.value)} style={{...s, minHeight: "80px", resize: "none"}} placeholder="Optional" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <textarea value={statement} onChange={e => setStatement(e.target.value)} style={{...s, minHeight: "160px", resize: "none"}} placeholder="Paste your personal statement here" />
-            )}
-          </div>
-        )}
+        {/* Navigation */}
+        <div className="mt-8 flex items-center justify-between">
+          <button
+            onClick={() => setStep((p) => Math.max(1, p - 1))}
+            disabled={step === 1 || saving}
+            className={`
+              py-3 px-5 rounded-xl
+              border border-[var(--b-strong)] bg-transparent
+              text-[var(--t2)]
+              font-mono text-[10px] font-medium uppercase tracking-[0.1em]
+              transition-all duration-150
+              hover:border-[var(--acc-border)] hover:text-[var(--acc)]
+              disabled:opacity-30 disabled:cursor-not-allowed
+            `}
+          >
+            Back
+          </button>
 
-        {err && <p style={{ marginTop: "16px", fontSize: "13px", color: "var(--rch-t)" }}>{err}</p>}
-
-        {/* Nav */}
-        <div style={{ marginTop: "32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <button onClick={() => setStep(p => Math.max(1, p-1))} disabled={step === 1 || saving}
-            className="btn btn-ghost" style={{ opacity: step === 1 ? 0.3 : 1 }}>← Back</button>
           {step < TOTAL ? (
-            <button onClick={() => setStep(p => p + 1)} disabled={(step === 2 && !name.trim()) || saving} className="btn btn-prim">
-              Continue →
+            <button
+              onClick={() => setStep((p) => p + 1)}
+              disabled={!canAdvance() || saving}
+              className="
+                py-4 px-8 rounded-xl
+                bg-[var(--acc)] text-[var(--t-inv)]
+                font-mono text-xs font-bold uppercase tracking-[0.14em]
+                transition-all duration-150
+                hover:bg-[var(--acc-h)] hover:shadow-glow
+                active:translate-y-[1px]
+                disabled:opacity-40 disabled:cursor-not-allowed
+              "
+              style={{
+                boxShadow: canAdvance()
+                  ? "0 2px 12px rgba(0,229,199,0.15), inset 0 1px 0 rgba(255,255,255,0.2)"
+                  : "none",
+              }}
+            >
+              Continue
             </button>
           ) : (
-            <button onClick={finish} disabled={saving} className="btn btn-prim">
-              {saving ? "Saving…" : "Build my dashboard →"}
+            <button
+              onClick={finish}
+              disabled={!canAdvance() || saving}
+              className="
+                py-4 px-8 rounded-xl
+                bg-[var(--acc)] text-[var(--t-inv)]
+                font-mono text-xs font-bold uppercase tracking-[0.14em]
+                transition-all duration-150
+                hover:bg-[var(--acc-h)] hover:shadow-glow
+                active:translate-y-[1px]
+                disabled:opacity-40 disabled:cursor-not-allowed
+              "
+              style={{
+                boxShadow: canAdvance() && !saving
+                  ? "0 2px 12px rgba(0,229,199,0.15), inset 0 1px 0 rgba(255,255,255,0.2)"
+                  : "none",
+              }}
+            >
+              {saving ? (
+                <span className="flex items-center gap-2">
+                  <span className="w-4 h-4 border-2 border-[var(--t-inv)] border-t-transparent rounded-full animate-spin inline-block" />
+                  Saving
+                </span>
+              ) : (
+                "Launch My Space"
+              )}
             </button>
           )}
         </div>

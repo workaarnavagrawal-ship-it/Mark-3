@@ -75,11 +75,12 @@ export async function GET(request: Request) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id")
+    .select("id, persona")
     .eq("user_id", data.user.id)
     .single();
 
-  const dest = profile ? "/dashboard" : "/onboarding";
+  // No profile or no persona = hasn't finished onboarding
+  const dest = profile?.persona ? "/my-space" : "/onboarding";
   const response = NextResponse.redirect(new URL(dest, siteUrl));
 
   // Attach session cookies directly so the browser receives them on the

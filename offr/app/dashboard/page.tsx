@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { PersonaLinks } from "@/components/dashboard/PersonaLinks";
 import { DashboardInsights } from "@/components/dashboard/DashboardInsights";
+import { DEMO_PROFILE } from "@/lib/demo";
 import type { DashboardInsightsRequest } from "@/lib/types";
 
 const BS: Record<string, any> = {
@@ -12,33 +12,43 @@ const BS: Record<string, any> = {
 };
 
 export default async function DashboardPage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/auth");
-  const { data: profile } = await supabase.from("profiles").select("*").eq("user_id", user.id).single();
-  if (!profile) redirect("/onboarding");
-  const { data: assessments } = await supabase.from("assessments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
-  const { data: shortlisted } = await supabase.from("shortlisted_courses").select("course_key, course_name, universities_count").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
-  const { data: subjects } = await supabase.from("subjects").select("*").eq("profile_id", profile.id);
+  let profile: any = { ...DEMO_PROFILE, year: "12", interests: DEMO_PROFILE.interest_tags, core_points: 0 };
+  let assessments: any[] = [];
+  let shortlisted: any[] = [];
+  let subjects: any[] = [];
 
-  const ibTotal = subjects?.filter((s: any) => s.level !== "A_LEVEL").reduce((acc: number, x: any) => acc + Number(x.predicted_grade), 0) || 0;
+  try {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: p } = await supabase.from("profiles").select("*").eq("user_id", user.id).single();
+      if (p) profile = p;
+      const { data: a } = await supabase.from("assessments").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
+      assessments = a || [];
+      const { data: s } = await supabase.from("shortlisted_courses").select("course_key, course_name, universities_count").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
+      shortlisted = s || [];
+      const { data: sub } = await supabase.from("subjects").select("*").eq("profile_id", profile.id);
+      subjects = sub || [];
+    }
+  } catch {}
+
+  const ibTotal = subjects.filter((s: any) => s.level !== "A_LEVEL").reduce((acc: number, x: any) => acc + Number(x.predicted_grade), 0) || 0;
   const ibScore = ibTotal + (profile.core_points || 0);
 
-  // Build deterministic context for Dashboard AI insights
   const bands: Record<string, number> = { Safe: 0, Target: 0, Reach: 0 };
-  (assessments || []).forEach((a: any) => { if (a.band in bands) bands[a.band]++; });
+  assessments.forEach((a: any) => { if (a.band in bands) bands[a.band]++; });
   const insightsRequest: DashboardInsightsRequest = {
     curriculum: profile.curriculum,
     year: String(profile.year),
     interests: profile.interests || [],
     has_ps: !!(profile.ps_q1 || profile.ps_statement),
-    has_subjects: !!(subjects && subjects.length > 0),
-    assessments_count: assessments?.length || 0,
+    has_subjects: subjects.length > 0,
+    assessments_count: assessments.length,
     bands,
-    shortlisted_count: shortlisted?.length || 0,
+    shortlisted_count: shortlisted.length,
     ib_score: profile.curriculum === "IB" ? ibScore || null : null,
     a_level_grades: profile.curriculum !== "IB"
-      ? (subjects || []).slice(0, 4).map((s: any) => s.predicted_grade)
+      ? subjects.slice(0, 4).map((s: any) => s.predicted_grade)
       : null,
   };
 
@@ -76,13 +86,13 @@ export default async function DashboardPage() {
             </>
           ) : (
             <p className="serif" style={{ fontSize: "28px", color: "var(--t)", lineHeight: 1.2 }}>
-              {subjects?.slice(0, 3).map((s: any) => s.predicted_grade).join(" · ") || "—"}
+              {subjects.slice(0, 3).map((s: any) => s.predicted_grade).join(" · ") || "—"}
             </p>
           )}
         </div>
         <div className="card">
           <p className="label">Choices assessed</p>
-          <p className="serif" style={{ fontSize: "46px", fontWeight: 400, color: "var(--t)", lineHeight: 1, marginBottom: "4px" }}>{assessments?.length || 0}</p>
+          <p className="serif" style={{ fontSize: "46px", fontWeight: 400, color: "var(--t)", lineHeight: 1, marginBottom: "4px" }}>{assessments.length}</p>
           <p style={{ fontSize: "12px", color: "var(--t3)" }}>of 5 UCAS slots</p>
         </div>
         <div className="card">
@@ -101,7 +111,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* AI insights — deterministic inputs passed from server; AI call happens client-side */}
+      {/* AI insights */}
       <DashboardInsights request={insightsRequest} />
 
       {/* Persona quick actions */}
@@ -113,7 +123,7 @@ export default async function DashboardPage() {
           <h3 className="serif" style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}>Shortlisted courses</h3>
           <Link href="/dashboard/explore" style={{ fontSize: "13px", color: "var(--t3)", textDecoration: "none" }}>Explore →</Link>
         </div>
-        {shortlisted && shortlisted.length > 0 ? (
+        {shortlisted.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {shortlisted.map((s: any) => (
               <div key={s.course_key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", background: "var(--s1)", border: "1px solid var(--b)", borderRadius: "12px" }}>
@@ -148,7 +158,7 @@ export default async function DashboardPage() {
           <h3 className="serif" style={{ fontSize: "20px", fontWeight: 400, color: "var(--t)" }}>Recent assessments</h3>
           <Link href="/dashboard/tracker" style={{ fontSize: "13px", color: "var(--t3)", textDecoration: "none" }}>View tracker →</Link>
         </div>
-        {assessments && assessments.length > 0 ? (
+        {assessments.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {assessments.map((a: any) => {
               const bs = BS[a.band] || BS.Reach;
