@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import Link from "next/link";
+import { DEMO_PROFILE } from "@/lib/demo";
 import type { PersonaV2, ProfileV2 } from "@/lib/types";
 
 /* ── Band pill styles ─────────────────────────────────────────── */
@@ -28,32 +28,40 @@ const QUICK_ACTIONS = [
 ];
 
 export default async function MySpacePage() {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/auth");
+  let p: ProfileV2 = DEMO_PROFILE;
+  let assessments: any[] = [];
+  let shortlisted: any[] = [];
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("user_id", user.id)
-    .single();
-  if (!profile || !profile.persona) redirect("/onboarding");
+  try {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("user_id", user.id)
+        .single();
+      if (profile?.persona) p = profile as ProfileV2;
 
-  const p = profile as ProfileV2;
+      const { data: a } = await supabase
+        .from("assessments")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      assessments = a || [];
 
-  const { data: assessments } = await supabase
-    .from("assessments")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(5);
-
-  const { data: shortlisted } = await supabase
-    .from("shortlisted_courses")
-    .select("course_key, course_name, universities_count")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(5);
+      const { data: s } = await supabase
+        .from("shortlisted_courses")
+        .select("course_key, course_name, universities_count")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      shortlisted = s || [];
+    }
+  } catch {
+    // No auth configured — use demo defaults
+  }
 
   /* ── Greeting ─────────────────────────────────────────────── */
   const h = new Date().getHours();
