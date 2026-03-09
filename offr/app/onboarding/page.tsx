@@ -138,7 +138,7 @@ export default function OnboardingPage() {
         predictedSummary = alevelSummary.trim();
       }
 
-      const profileData = {
+      const profileData: Record<string, unknown> = {
         user_id: user.id,
         name: name.trim(),
         persona,
@@ -148,9 +148,7 @@ export default function OnboardingPage() {
         ib_subject_total: curriculum === "IB" ? finalSubjectTotal : null,
         ib_bonus_points: curriculum === "IB" ? finalBonusPoints : null,
         ib_total_points: curriculum === "IB" ? finalTotalPoints : null,
-        alevel_predicted: curriculum === "ALEVEL" ? [{ summary: alevelSummary.trim() }] : null,
         interest_tags: interests,
-        interests: interests.slice(0, 3), // compat with old column
         updated_at: new Date().toISOString(),
       };
 
