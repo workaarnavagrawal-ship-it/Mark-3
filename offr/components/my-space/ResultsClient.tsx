@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import HardwarePanel from "@/components/monologue/HardwarePanel";
 import LabelRail from "@/components/monologue/LabelRail";
 import Meter from "@/components/monologue/Meter";
 import DrawerSheet from "@/components/monologue/DrawerSheet";
+import { PrimaryActionKey } from "@/components/monologue/Keys";
 import { useState } from "react";
 import type { ProfileV2 } from "@/lib/types";
 
@@ -134,8 +136,33 @@ export function ResultsClient({ profile, assessments }: Props) {
           const bs = BAND_COLORS[band] || BAND_COLORS.Reach;
           const counsellor = result.counsellor || {};
 
+          // Breakdown scores
+          const fitScore = drawerItem.fit_score ?? result.fit_score ?? null;
+          const gradeMatch = drawerItem.grade_match ?? result.grade_match ?? null;
+          const subjectMatch = result.subject_match ?? null;
+          const psImpact = drawerItem.ps_impact ?? result.ps_impact ?? null;
+
+          // "What would change this" actions
+          const changeActions: { label: string; href: string }[] = [];
+          if (psImpact !== null && psImpact < 60) {
+            changeActions.push({ label: "Improve your personal statement — PS impact is low", href: "/your-ps" });
+          }
+          if (gradeMatch !== null && gradeMatch < 50) {
+            changeActions.push({ label: "Consider a course with lower grade requirements", href: "/my-strategy" });
+          }
+          if (band === "Reach") {
+            changeActions.push({ label: "Explore alternative courses with better fit", href: "/database" });
+          }
+          if (changeActions.length === 0 && band !== "Safe") {
+            changeActions.push({ label: "Run PS analysis to boost your chances", href: "/your-ps" });
+          }
+
+          // Determine bottleneck for primary CTA
+          const bottleneck = psImpact !== null && psImpact < 50 ? "ps" : "strategy";
+
           return (
             <div className="flex flex-col gap-5">
+              {/* Header */}
               <div>
                 <h3 className="serif text-[22px] font-normal text-[var(--t)] mb-1">
                   {drawerItem.course_name}
@@ -163,6 +190,65 @@ export function ResultsClient({ profile, assessments }: Props) {
                 </p>
               )}
 
+              {/* ── BREAKDOWN panel ── */}
+              <HardwarePanel compact>
+                <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--t3)] mb-3 block">
+                  Breakdown
+                </span>
+                <div className="flex flex-col gap-3">
+                  {fitScore !== null && (
+                    <Meter label="Fit Score" value={fitScore} variant="accent" />
+                  )}
+                  {gradeMatch !== null && (
+                    <Meter label="Grade Match" value={gradeMatch} variant={gradeMatch >= 70 ? "safe" : gradeMatch >= 40 ? "target" : "reach"} />
+                  )}
+                  {subjectMatch !== null && (
+                    <Meter label="Subject Match" value={subjectMatch} variant={subjectMatch >= 70 ? "safe" : subjectMatch >= 40 ? "target" : "reach"} />
+                  )}
+                  {psImpact !== null && (
+                    <Meter label="PS Impact" value={psImpact} variant={psImpact >= 60 ? "safe" : psImpact >= 30 ? "target" : "reach"} />
+                  )}
+                  {fitScore === null && gradeMatch === null && subjectMatch === null && psImpact === null && (
+                    <p className="text-[12px] text-[var(--t3)]">
+                      Run a detailed assessment to see the full breakdown.
+                    </p>
+                  )}
+                </div>
+              </HardwarePanel>
+
+              {/* ── WHAT WOULD CHANGE THIS panel ── */}
+              {changeActions.length > 0 && (
+                <HardwarePanel compact>
+                  <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--t3)] mb-3 block">
+                    What would change this
+                  </span>
+                  <div className="flex flex-col gap-2">
+                    {changeActions.slice(0, 3).map((action, i) => (
+                      <Link key={i} href={action.href} className="no-underline block">
+                        <div className="flex items-center gap-3 group">
+                          <span className="w-5 h-5 rounded-full border border-[var(--acc-border)] bg-[var(--s3)] flex items-center justify-center shrink-0">
+                            <span className="font-mono text-[9px] font-bold text-[var(--acc)]">
+                              {i + 1}
+                            </span>
+                          </span>
+                          <span className="text-[12px] text-[var(--t2)] group-hover:text-[var(--acc)] transition-colors">
+                            {action.label}
+                          </span>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                </HardwarePanel>
+              )}
+
+              {/* Primary CTA based on bottleneck */}
+              <Link href={bottleneck === "ps" ? "/your-ps" : "/my-strategy"} style={{ textDecoration: "none" }}>
+                <PrimaryActionKey>
+                  {bottleneck === "ps" ? "IMPROVE PS" : "ADJUST STRATEGY"}
+                </PrimaryActionKey>
+              </Link>
+
+              {/* Strengths / Risks / Next Steps */}
               {counsellor.strengths?.length > 0 && (
                 <div>
                   <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--t3)] mb-2 block">
@@ -184,19 +270,6 @@ export function ResultsClient({ profile, assessments }: Props) {
                   <ul className="flex flex-col gap-1">
                     {counsellor.risks.map((r: string, i: number) => (
                       <li key={i} className="text-[12px] text-[var(--rch-t)]">· {r}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {counsellor.what_to_do_next?.length > 0 && (
-                <div>
-                  <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[var(--t3)] mb-2 block">
-                    Next steps
-                  </span>
-                  <ul className="flex flex-col gap-1">
-                    {counsellor.what_to_do_next.map((n: string, i: number) => (
-                      <li key={i} className="text-[12px] text-[var(--t2)]">· {n}</li>
                     ))}
                   </ul>
                 </div>

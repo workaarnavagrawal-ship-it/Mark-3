@@ -275,13 +275,206 @@ def ensure_university_id(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+_DATA_QUALITY_REPORT: Optional[Dict[str, Any]] = None
+
+KNOWN_DEGREE_TOKENS = {
+    "BA", "BSc", "BEng", "MEng", "MMath", "MSci", "MChem", "MPhys",
+    "LLB", "BDS", "MBBS", "MB", "BVSc", "BMus", "BFA", "BSocSc",
+}
+
+EXPECTED_COLS = [
+    "course_id", "faculty", "course_name", "degree_type", "course_url",
+    "curriculum_supported", "typical_offer", "min_requirements",
+    "min_points_home", "intl_buffer_points", "required_subjects",
+    "recommended_subjects", "ps_expected_signals",
+    "estimated_annual_cost_international", "notes",
+]
+
+
+def _is_url(val: str) -> bool:
+    return bool(val and (val.startswith("http://") or val.startswith("https://")))
+
+
+def _is_numeric_cost(val: str) -> bool:
+    if not val:
+        return False
+    cleaned = re.sub(r"[£$€,\s]", "", val)
+    try:
+        float(cleaned)
+        return True
+    except ValueError:
+        return False
+
+
+def _extract_numeric(val: str) -> str:
+    cleaned = re.sub(r"[£$€,\s]", "", val)
+    return cleaned
+
+
+def clean_csv(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Clean the CSV according to spec Cases A/B/C. Returns cleaned df and quality report.
+    """
+    report: Dict[str, Any] = {
+        "total_rows_raw": len(df),
+        "case_a_fixed": 0,
+        "case_b_fixed": 0,
+        "case_c_fixed": 0,
+        "rows_dropped": 0,
+        "dropped_course_ids": [],
+    }
+
+    # Drop Unnamed columns content but keep track
+    unnamed_cols = [c for c in df.columns if c.startswith("Unnamed")]
+    has_unnamed = len(unnamed_cols) > 0
+
+    clean_rows = []
+    extra_rows = []  # from Case B splits
+
+    for idx, row in df.iterrows():
+        try:
+            rd = row.to_dict()
+            course_id = clean_str(rd.get("course_id", ""))
+            if not course_id:
+                report["rows_dropped"] += 1
+                continue
+
+            cost_val = clean_str(rd.get("estimated_annual_cost_international", ""))
+            notes_val = clean_str(rd.get("notes", ""))
+            ps_signals = clean_str(rd.get("ps_expected_signals", ""))
+            degree_type = clean_str(rd.get("degree_type", ""))
+            course_url = clean_str(rd.get("course_url", ""))
+            typical_offer = clean_str(rd.get("typical_offer", ""))
+
+            # Gather unnamed column values
+            unnamed_vals = [clean_str(rd.get(c, "")) for c in unnamed_cols]
+            unnamed_vals = [v for v in unnamed_vals if v]
+
+            # ── Case C: course_name split across columns ──
+            # If degree_type is not a known token AND course_url is not a URL
+            # AND typical_offer looks like a URL → columns shifted
+            if (degree_type and degree_type not in KNOWN_DEGREE_TOKENS
+                    and not _is_url(course_url) and _is_url(typical_offer)):
+                # Reconstruct: course_name = faculty + course_name + degree_type (joined with ", ")
+                faculty_val = clean_str(rd.get("faculty", ""))
+                cname_val = clean_str(rd.get("course_name", ""))
+                rd["course_name"] = ", ".join(filter(None, [faculty_val, cname_val, degree_type]))
+                # Shift fields: degree_type = course_url, course_url = typical_offer, etc.
+                rd["degree_type"] = course_url
+                rd["course_url"] = typical_offer
+                rd["typical_offer"] = clean_str(rd.get("min_requirements", ""))
+                rd["min_requirements"] = clean_str(rd.get("min_points_home", ""))
+                rd["min_points_home"] = clean_str(rd.get("intl_buffer_points", ""))
+                rd["intl_buffer_points"] = clean_str(rd.get("required_subjects", ""))
+                rd["required_subjects"] = clean_str(rd.get("recommended_subjects", ""))
+                rd["recommended_subjects"] = ps_signals
+                # Recover cost from unnamed numeric
+                found_cost = False
+                for uv in unnamed_vals:
+                    if _is_numeric_cost(uv):
+                        rd["estimated_annual_cost_international"] = _extract_numeric(uv)
+                        found_cost = True
+                        break
+                if not found_cost:
+                    rd["estimated_annual_cost_international"] = cost_val
+                # Set ps_expected_signals from remaining descriptive fields
+                rd["ps_expected_signals"] = notes_val
+                rd["notes"] = " ".join([v for v in unnamed_vals if not _is_numeric_cost(v)])
+                report["case_c_fixed"] += 1
+                cost_val = rd["estimated_annual_cost_international"]
+                notes_val = rd["notes"]
+                ps_signals = rd["ps_expected_signals"]
+
+            # ── Case A: cost/signals shifted into wrong columns ──
+            elif cost_val and not _is_numeric_cost(cost_val):
+                # Cost column has non-numeric text (probably ps_expected_signals fragment)
+                found_numeric = None
+                for uv in unnamed_vals:
+                    if _is_numeric_cost(uv):
+                        found_numeric = uv
+                        break
+                if found_numeric:
+                    # Reconstruct ps_expected_signals
+                    signal_parts = [ps_signals, cost_val]
+                    remaining_unnamed = [v for v in unnamed_vals if v != found_numeric and not _is_numeric_cost(v)]
+                    signal_parts.extend(remaining_unnamed[:1])
+                    rd["ps_expected_signals"] = ", ".join(filter(None, signal_parts))
+                    rd["estimated_annual_cost_international"] = _extract_numeric(found_numeric)
+                    # Move actual notes
+                    notes_parts = [v for v in unnamed_vals if v != found_numeric and v not in remaining_unnamed[:1]]
+                    if notes_parts:
+                        rd["notes"] = notes_parts[0]
+                    report["case_a_fixed"] += 1
+
+            # ── Case B: merged two courses into one row ──
+            # Check if notes contains another course_id pattern or unnamed cols have a full second record
+            second_course_id = None
+            if notes_val:
+                cid_match = re.search(r"\b([A-Z]{2,5}_[A-Za-z0-9_]+)\b", notes_val)
+                if cid_match:
+                    candidate = cid_match.group(1)
+                    prefix = candidate.split("_")[0]
+                    if prefix in UNIVERSITY_NAME_MAP:
+                        second_course_id = candidate
+
+            if second_course_id and len(unnamed_vals) >= 3:
+                # Fix first record: remove embedded course_id from notes
+                rd["notes"] = notes_val.replace(second_course_id, "").strip().strip(",").strip()
+                # Build second record from unnamed fields
+                second_rd: Dict[str, Any] = {}
+                second_rd["course_id"] = second_course_id
+                # Map unnamed values to remaining expected columns
+                fill_cols = ["faculty", "course_name", "degree_type", "course_url",
+                             "typical_offer", "min_requirements", "min_points_home",
+                             "intl_buffer_points", "required_subjects", "recommended_subjects",
+                             "ps_expected_signals", "estimated_annual_cost_international", "notes"]
+                for i, col in enumerate(fill_cols):
+                    if i < len(unnamed_vals):
+                        second_rd[col] = unnamed_vals[i]
+                    else:
+                        second_rd[col] = ""
+                extra_rows.append(second_rd)
+                report["case_b_fixed"] += 1
+
+            # Keep the (possibly fixed) row — strip unnamed cols
+            cleaned = {k: nan_to_none(v) for k, v in rd.items() if not k.startswith("Unnamed")}
+            clean_rows.append(cleaned)
+
+        except Exception as e:
+            logger.warning(f"Row {idx} unrecoverable: {e}")
+            report["rows_dropped"] += 1
+            cid = clean_str(row.get("course_id", f"row_{idx}"))
+            report["dropped_course_ids"].append(cid)
+
+    # Build cleaned dataframe
+    all_rows = clean_rows + extra_rows
+    if not all_rows:
+        raise RuntimeError("No valid rows after cleaning")
+    result_df = pd.DataFrame(all_rows)
+
+    # Drop fully-unnamed columns that might have survived
+    result_df = result_df[[c for c in result_df.columns if not c.startswith("Unnamed")]]
+
+    report["total_rows_clean"] = len(result_df)
+    report["extra_rows_from_splits"] = len(extra_rows)
+
+    logger.info(
+        f"CSV Quality Report: {report['total_rows_raw']} raw → {report['total_rows_clean']} clean | "
+        f"Case A: {report['case_a_fixed']}, B: {report['case_b_fixed']}, C: {report['case_c_fixed']} | "
+        f"Dropped: {report['rows_dropped']}"
+    )
+
+    return result_df, report
+
+
 def load_df() -> pd.DataFrame:
-    global _DF
+    global _DF, _DATA_QUALITY_REPORT
     if _DF is None:
         if not DATA_DIR.exists():
             raise RuntimeError(f"Data directory not found: {DATA_DIR}")
         path = pick_data_path()
-        _DF = pd.read_csv(path, dtype=str, engine="python")
+        raw_df = pd.read_csv(path, dtype=str, engine="python")
+        _DF, _DATA_QUALITY_REPORT = clean_csv(raw_df)
         _DF = ensure_university_id(_DF)
     return _DF
 
@@ -1300,12 +1493,25 @@ def health():
         return {"status": "error", "detail": str(e)}
 
 
+@app.get("/api/py/data-quality")
+def data_quality():
+    """Return the data quality report from CSV cleaning."""
+    load_df()  # ensure loaded
+    return _DATA_QUALITY_REPORT or {"status": "no report available"}
+
+
 @app.get("/api/py/universities")
 def universities():
     df = load_df()
     ids = sorted({clean_str(x) for x in df["university_id"].fillna("").tolist() if clean_str(x)})
+    # Count offerings per university
+    uni_counts = df["university_id"].astype(str).str.upper().value_counts().to_dict()
     return [
-        {"university_id": uid, "university_name": UNIVERSITY_NAME_MAP.get(uid, uid)}
+        {
+            "university_id": uid,
+            "university_name": UNIVERSITY_NAME_MAP.get(uid, uid),
+            "offering_count": uni_counts.get(uid.upper(), 0),
+        }
         for uid in ids
     ]
 

@@ -1,10 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
-import { Sidebar } from "@/components/my-space/Sidebar";
+import Sidebar from "@/components/monologue/Sidebar";
 import { MySpaceConsoleRail } from "@/components/my-space/MySpaceConsoleRail";
 import { DEMO_PROFILE } from "@/lib/demo";
 import type { PersonaV2 } from "@/lib/types";
 
-export default async function MySpaceLayout({ children }: { children: React.ReactNode }) {
+export default async function ShellLayout({ children }: { children: React.ReactNode }) {
   let profileName = DEMO_PROFILE.name;
   let profilePersona: PersonaV2 = DEMO_PROFILE.persona!;
   let shortlistCount = 0;

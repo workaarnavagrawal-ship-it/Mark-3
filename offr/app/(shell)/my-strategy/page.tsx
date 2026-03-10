@@ -3,7 +3,7 @@ import { StrategyClient } from "@/components/my-space/StrategyClient";
 import { DEMO_PROFILE } from "@/lib/demo";
 import type { ProfileV2 } from "@/lib/types";
 
-export default async function StrategyPage() {
+export default async function MyStrategyPage() {
   let profile: ProfileV2 = DEMO_PROFILE;
   let assessments: any[] = [];
   try {

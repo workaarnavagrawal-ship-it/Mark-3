@@ -20,13 +20,13 @@ export function StrategistHub({ profile, assessmentCount, hasPS, shortlistCount 
 
   // Determine primary CTA
   let ctaLabel = "ADD MY 5 CHOICES";
-  let ctaHref = "/my-space/strategy";
+  let ctaHref = "/my-strategy";
   if (choicesDone && !psDone) {
     ctaLabel = "START PS";
-    ctaHref = "/my-space/ps";
+    ctaHref = "/your-ps";
   } else if (choicesDone && psDone) {
     ctaLabel = "RUN CHECKS";
-    ctaHref = "/my-space/results";
+    ctaHref = "/results";
   }
 
   return (
@@ -56,19 +56,19 @@ export function StrategistHub({ profile, assessmentCount, hasPS, shortlistCount 
           <ChecklistItem
             step="01"
             label="Add 5 UCAS choices"
-            href="/my-space/strategy"
+            href="/my-strategy"
             done={choicesDone}
           />
           <ChecklistItem
             step="02"
             label="Build your personal statement"
-            href="/my-space/ps"
+            href="/your-ps"
             done={psDone}
           />
           <ChecklistItem
             step="03"
             label="Run checks on all choices"
-            href="/my-space/results"
+            href="/results"
             done={checksDone}
           />
         </div>
@@ -93,7 +93,7 @@ export function StrategistHub({ profile, assessmentCount, hasPS, shortlistCount 
             Move shortlisted courses into your strategy slots.
           </p>
           <Link
-            href="/my-space/strategy"
+            href="/my-strategy"
             className="font-mono text-[11px] uppercase tracking-[0.1em] text-[var(--acc)] no-underline hover:underline"
           >
             Open Strategy →
@@ -110,7 +110,7 @@ export function StrategistHub({ profile, assessmentCount, hasPS, shortlistCount 
           Browse the full database to find courses and add to your strategy.
         </p>
         <Link
-          href="/my-space/database"
+          href="/database"
           className="font-mono text-[11px] uppercase tracking-[0.1em] text-[var(--acc)] no-underline hover:underline"
         >
           Open Database →

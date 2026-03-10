@@ -9,15 +9,15 @@ import type { PersonaV2 } from "@/lib/types";
 
 const CORE_NAV = [
   { href: "/my-space",          label: "My Space" },
-  { href: "/my-space/strategy", label: "My Strategy" },
-  { href: "/my-space/ps",       label: "Your PS" },
-  { href: "/my-space/database", label: "Database" },
-  { href: "/my-space/results",  label: "Results" },
+  { href: "/my-strategy",  label: "My Strategy" },
+  { href: "/your-ps",      label: "Your PS" },
+  { href: "/database",     label: "Database" },
+  { href: "/results",      label: "Results" },
 ];
 
 const TOOLS_NAV = [
-  { href: "/my-space/profile", label: "Profile" },
-  { href: "/my-space/faq",     label: "FAQ" },
+  { href: "/profile", label: "Profile" },
+  { href: "/faq",     label: "FAQ" },
 ];
 
 /* ── Persona badge config ─────────────────────────────────────── */

@@ -46,15 +46,15 @@ export function FinisherHub({ profile, assessmentCount, hasPS, fixes }: Props) {
 
         {/* Lock indicators */}
         <div className="flex flex-col gap-4 mb-8">
-          <LockRow label="5 UCAS Choices" locked={choicesLocked} href="/my-space/strategy" />
-          <LockRow label="PS Analysis" locked={psLocked} href="/my-space/ps" />
-          <LockRow label="Offer Chances" locked={chancesLocked} href="/my-space/results" />
+          <LockRow label="5 UCAS Choices" locked={choicesLocked} href="/my-strategy" />
+          <LockRow label="PS Analysis" locked={psLocked} href="/your-ps" />
+          <LockRow label="Offer Chances" locked={chancesLocked} href="/results" />
         </div>
 
         {allReady ? (
           <PrimaryActionKey disabled>READY</PrimaryActionKey>
         ) : (
-          <Link href={!choicesLocked ? "/my-space/strategy" : !psLocked ? "/my-space/ps" : "/my-space/results"} style={{ textDecoration: "none" }}>
+          <Link href={!choicesLocked ? "/my-strategy" : !psLocked ? "/your-ps" : "/results"} style={{ textDecoration: "none" }}>
             <PrimaryActionKey>COMPLETE FINAL CHECKS</PrimaryActionKey>
           </Link>
         )}

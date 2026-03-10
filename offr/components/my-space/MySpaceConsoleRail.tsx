@@ -103,25 +103,25 @@ function NextAction({
   } else if (persona === "STRATEGIST") {
     if (assessmentCount < 5) {
       text = `Add ${5 - assessmentCount} more UCAS choice${5 - assessmentCount > 1 ? "s" : ""}`;
-      href = "/my-space/strategy";
+      href = "/my-strategy";
     } else if (!hasPS) {
       text = "Start your personal statement";
-      href = "/my-space/ps";
+      href = "/your-ps";
     } else {
       text = "Run final checks on all choices";
-      href = "/my-space/results";
+      href = "/results";
     }
   } else {
     // FINISHER
     if (assessmentCount < 5) {
       text = "Complete your 5 UCAS choices";
-      href = "/my-space/strategy";
+      href = "/my-strategy";
     } else if (!hasPS) {
       text = "Analyse your personal statement";
-      href = "/my-space/ps";
+      href = "/your-ps";
     } else {
       text = "All checks complete — review results";
-      href = "/my-space/results";
+      href = "/results";
     }
   }
 

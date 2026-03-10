@@ -7,13 +7,13 @@ const FAQS = [
   { category: "How it works", q: "What is 'real applicant pool' data?", a: "We gathered self-reported offer data from students who applied in 2024–25 across 14 universities. This lets us compare your grades to people who actually received offers — not just the published floor. It's a more honest picture of what admission really looks like." },
   { category: "Personal statement", q: "Why does my personal statement affect the prediction?", a: "Our data shows a clear correlation between PS quality and offer rates, particularly at selective universities. Students with stronger statements consistently outperform those with similar grades but weaker ones. offr weights PS impact based on institutional selectivity." },
   { category: "Personal statement", q: "How does line-by-line PS feedback work?", a: "The PS Analyser splits your statement into sentence-level chunks, then evaluates each one for intellectual depth, specificity, evidence, and subject relevance. Each chunk gets a score (1–10), a verdict (Strong/Improve/Weak/Neutral), feedback, and an optional suggested rewrite." },
-  { category: "Personal statement", q: "Should I use the UCAS 3 questions or single text format?", a: "If you're applying for 2025 entry, use the UCAS 3 questions format — it matches the new UCAS application structure. The legacy single-text format is there for older applications or if you prefer to draft as a continuous statement first." },
-  { category: "Your profile", q: "Can I update my profile later?", a: "Yes — go to My Profile anytime and edit your grades, PS, or interests. All future assessments will automatically use your updated information." },
+  { category: "Personal statement", q: "Should I use the UCAS 3 questions or single text format?", a: "If you're applying for 2026 entry, use the UCAS 3 questions format — it matches the new UCAS application structure. The legacy single-text format is there for older applications or if you prefer to draft as a continuous statement first." },
+  { category: "Your profile", q: "Can I update my profile later?", a: "Yes — go to Profile anytime and edit your grades, PS, or interests. All future assessments will automatically use your updated information." },
   { category: "Your profile", q: "Is my data secure?", a: "Yes. Your profile is stored in Supabase with row-level security — only you can access your data. Your personal statement is never shared or used outside of your own assessments." },
   { category: "Your profile", q: "Can I use offr for A-Levels as well as IB?", a: "Yes. offr supports both IB Diploma and A-Level students. Your predicted grades are compared against real offer holder profiles for each course." },
-  { category: "Tracker & strategy", q: "How does the Offer Tracker work?", a: "Every time you run an assessment, it's saved automatically to your tracker. You can label each choice (Firm, Insurance, Backup, Wildcard), view your full UCAS picture in one place, and delete or re-run any entry." },
-  { category: "Tracker & strategy", q: "What are hidden gems in Explore?", a: "Hidden gems are excellent, career-relevant courses that are less well-known than the obvious options — things like MORSE at Warwick, Cognitive Science at Edinburgh, or Management Science at LSE. They often have lower competition and strong graduate outcomes." },
-  { category: "Tracker & strategy", q: "What does the Strategy page do?", a: "Strategy helps you audit your UCAS shortlist as a whole. It analyses your Safe/Target/Reach mix and flags if your list is unbalanced. It also surfaces PS improvement tips and alternative course suggestions based on your interests." },
+  { category: "UCAS choices", q: "How many UCAS choices do I get?", a: "UCAS allows 5 choices total. For medicine, dentistry, and veterinary science, you can usually apply to a maximum of 4 courses in that subject plus 1 other." },
+  { category: "UCAS choices", q: "What about Oxbridge and early deadlines?", a: "Oxford and Cambridge applications, along with most medicine, dentistry, and veterinary courses, have an early deadline window. Other courses fall under the main equal-consideration deadline. offr flags this automatically when you add these choices to your strategy." },
+  { category: "UCAS choices", q: "What is the structured PS format?", a: "For 2026 entry, UCAS uses a structured format with 3 sections. Each has its own text area. The total limit across all sections is 4,000 characters. offr supports both this structured format and a freeform single-text mode." },
   { category: "General", q: "Is offr free?", a: "Yes, completely. No credit card, no premium tier." },
   { category: "General", q: "What universities does offr cover?", a: "We currently cover 14 UK universities including Oxford, Cambridge, LSE, Imperial, UCL, Warwick, Edinburgh, Bristol, Durham, Bath, St Andrews, King's College London, Manchester, and Exeter." },
 ];
@@ -28,10 +28,10 @@ interface AskResult {
 }
 
 function FAQAssistant() {
-  const [question,    setQuestion]    = useState("");
-  const [askState,    setAskState]    = useState<AskState>("idle");
-  const [result,      setResult]      = useState<AskResult | null>(null);
-  const [error,       setError]       = useState<string | null>(null);
+  const [question, setQuestion] = useState("");
+  const [askState, setAskState] = useState<AskState>("idle");
+  const [result, setResult] = useState<AskResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function ask(q?: string) {
@@ -64,7 +64,6 @@ function FAQAssistant() {
       <p style={{ fontSize: "13px", color: "var(--t3)", marginBottom: "16px", lineHeight: 1.6 }}>
         Ask anything about UCAS, offr, or UK university admissions.
       </p>
-
       <div style={{ display: "flex", gap: "8px" }}>
         <input
           ref={inputRef}
@@ -82,10 +81,9 @@ function FAQAssistant() {
           className="btn btn-prim"
           style={{ flexShrink: 0, padding: "10px 20px", fontSize: "13px" }}
         >
-          {askState === "loading" ? "…" : "Ask →"}
+          {askState === "loading" ? "…" : "Ask"}
         </button>
       </div>
-
       {askState === "loading" && (
         <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "7px" }}>
           {[90, 70, 80].map((w, i) => (
@@ -94,13 +92,11 @@ function FAQAssistant() {
           <style>{`@keyframes offr-pulse { 0%,100%{opacity:0.3} 50%{opacity:0.7} }`}</style>
         </div>
       )}
-
       {askState === "error" && error && (
         <div style={{ marginTop: "14px", padding: "12px 16px", background: "var(--rch-bg)", border: "1px solid var(--rch-b)", borderRadius: "var(--ri)" }}>
           <p style={{ fontSize: "13px", color: "var(--rch-t)" }}>{error}</p>
         </div>
       )}
-
       {askState === "ok" && result && (
         <div style={{ marginTop: "16px" }}>
           <div style={{ padding: "16px 20px", background: "var(--s2)", border: "1px solid var(--b)", borderRadius: "var(--ri)", marginBottom: "12px" }}>
@@ -115,9 +111,7 @@ function FAQAssistant() {
                     background: "transparent", border: "1px solid var(--b)", borderRadius: "9999px",
                     padding: "5px 13px", fontSize: "12px", color: "var(--t3)", cursor: "pointer",
                     fontFamily: "var(--font-dm, var(--sans))", transition: "all 150ms",
-                  }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b-strong)"; (e.currentTarget as HTMLElement).style.color = "var(--t2)"; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--b)"; (e.currentTarget as HTMLElement).style.color = "var(--t3)"; }}>
+                  }}>
                     {fq}
                   </button>
                 ))}
@@ -147,9 +141,9 @@ export default function FAQPage() {
       <FAQAssistant />
 
       <div style={{ display: "flex", gap: "7px", marginBottom: "24px", flexWrap: "wrap" }}>
-        <button onClick={() => setActiveCategory(null)} style={{ padding: "6px 14px", borderRadius: "9999px", border: `1px solid ${!activeCategory ? "var(--acc)" : "var(--b)"}`, background: !activeCategory ? "var(--acc)" : "transparent", color: !activeCategory ? "var(--t-inv)" : "var(--t3)", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))", transition: "all 150ms" }}>All</button>
+        <button onClick={() => setActiveCategory(null)} style={{ padding: "6px 14px", borderRadius: "9999px", border: `1px solid ${!activeCategory ? "var(--acc)" : "var(--b)"}`, background: !activeCategory ? "var(--acc)" : "transparent", color: !activeCategory ? "var(--t-inv)" : "var(--t3)", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))" }}>All</button>
         {CATEGORIES.map(c => (
-          <button key={c} onClick={() => setActiveCategory(activeCategory === c ? null : c)} style={{ padding: "6px 14px", borderRadius: "9999px", border: `1px solid ${activeCategory === c ? "var(--acc)" : "var(--b)"}`, background: activeCategory === c ? "var(--acc)" : "transparent", color: activeCategory === c ? "var(--t-inv)" : "var(--t3)", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))", transition: "all 150ms" }}>{c}</button>
+          <button key={c} onClick={() => setActiveCategory(activeCategory === c ? null : c)} style={{ padding: "6px 14px", borderRadius: "9999px", border: `1px solid ${activeCategory === c ? "var(--acc)" : "var(--b)"}`, background: activeCategory === c ? "var(--acc)" : "transparent", color: activeCategory === c ? "var(--t-inv)" : "var(--t3)", fontSize: "12px", cursor: "pointer", fontFamily: "var(--font-dm, var(--sans))" }}>{c}</button>
         ))}
       </div>
 
@@ -162,10 +156,8 @@ export default function FAQPage() {
               <button onClick={() => setOpen(isOpen ? null : idx)} style={{
                 width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
                 padding: "18px 22px", background: "transparent", border: "none", cursor: "pointer",
-                textAlign: "left", gap: "16px", transition: "background 150ms",
-              }}
-              onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = "var(--s2)"}
-              onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = "transparent"}>
+                textAlign: "left", gap: "16px",
+              }}>
                 <span style={{ fontSize: "14px", color: "var(--t)", lineHeight: 1.4, fontFamily: "var(--font-dm, var(--sans))" }}>{faq.q}</span>
                 <span style={{ color: "var(--t3)", fontSize: "12px", flexShrink: 0, display: "inline-block", transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 200ms" }}>▾</span>
               </button>

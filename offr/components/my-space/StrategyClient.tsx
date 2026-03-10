@@ -362,7 +362,7 @@ export function StrategyClient({ profile, existingAssessments = [] }: Props) {
       {/* Import from shortlist */}
       <div className="mt-6">
         <Link
-          href="/my-space/database"
+          href="/database"
           className="font-mono text-[11px] uppercase tracking-[0.1em] text-[var(--t3)] no-underline hover:text-[var(--acc)] transition-colors"
         >
           Browse database to add courses →

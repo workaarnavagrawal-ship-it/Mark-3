@@ -20,19 +20,19 @@ export function MySpaceClient({ profile, assessmentCount, shortlistCount, hasPS 
   if (assessmentCount < 5) {
     fixes.push({
       label: `Add ${5 - assessmentCount} more UCAS choice${5 - assessmentCount > 1 ? "s" : ""} to your strategy`,
-      href: "/my-space/strategy",
+      href: "/my-strategy",
     });
   }
   if (!hasPS) {
     fixes.push({
       label: "Write and analyse your personal statement",
-      href: "/my-space/ps",
+      href: "/your-ps",
     });
   }
   if (assessmentCount > 0 && assessmentCount < 5) {
     fixes.push({
       label: "Run offer checks on remaining slots",
-      href: "/my-space/results",
+      href: "/results",
     });
   }
 
