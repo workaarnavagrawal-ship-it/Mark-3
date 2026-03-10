@@ -31,6 +31,12 @@ alter table profiles add column if not exists interest_tags text[] default '{}';
 -- Rename interests -> interest_tags handled by keeping both columns alive
 -- (interest_tags is the new canonical column; interests kept for compat)
 
+-- Make legacy columns nullable (onboarding no longer collects year/core_points)
+alter table profiles alter column year drop not null;
+alter table profiles alter column year set default '12';
+alter table profiles alter column core_points drop not null;
+alter table profiles alter column name set default '';
+
 -- Relax constraints if they exist from old schema
 -- (persona can be null during onboarding step 1-3)
 do $$
