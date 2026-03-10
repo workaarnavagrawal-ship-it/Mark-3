@@ -9,7 +9,7 @@ export default async function LandingPage({ searchParams }: { searchParams: { co
 
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (user) redirect("/dashboard");
+  if (user) redirect("/my-space");
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
