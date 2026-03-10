@@ -2992,3 +2992,310 @@ async def ps_evaluate(request: Request):
             "latency_ms": latency_total,
         },
     })
+
+
+# ─────────────────────────────────────────────────────────────
+# V2 Spec-aligned endpoints: course-groups, offerings, recommend
+# ─────────────────────────────────────────────────────────────
+
+DEGREE_TOKENS = re.compile(
+    r"\b(BSc|BA|BEng|MEng|MSci|MMath|MPhys|MChem|LLB|BDS|MBBS|"
+    r"BMedSci|BVSc|MBChB|MA|PhD|DPhil)\b", re.IGNORECASE
+)
+
+
+def _canonical_course_name(raw: str) -> str:
+    """Strip trailing degree tokens to canonicalize course names for grouping."""
+    name = clean_str(raw)
+    name = DEGREE_TOKENS.sub("", name)
+    name = re.sub(r"\s*\(Hons\)\s*", " ", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s+", " ", name).strip().rstrip(" -,;")
+    return name
+
+
+def _build_course_groups(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Build deduped course groups from the DataFrame."""
+    groups: Dict[str, Dict[str, Any]] = {}
+
+    for _, row in df.iterrows():
+        raw_name = clean_str(row.get("course_name", ""))
+        if not raw_name:
+            continue
+        canonical = _canonical_course_name(raw_name)
+        key = normalize_course_key(canonical)
+        if not key:
+            continue
+
+        uid = clean_str(row.get("university_id", ""))
+        uni_name = UNIVERSITY_NAME_MAP.get(uid, uid)
+        faculty = clean_str(row.get("faculty", ""))
+
+        if key not in groups:
+            groups[key] = {
+                "course_group_key": key,
+                "course_group_name": canonical,
+                "offerings_count": 0,
+                "offerings_preview": [],
+                "representative_faculty": faculty or None,
+                "_uni_names": set(),
+            }
+        g = groups[key]
+        g["offerings_count"] += 1
+        if uni_name and uni_name not in g["_uni_names"]:
+            g["_uni_names"].add(uni_name)
+            if len(g["offerings_preview"]) < 3:
+                g["offerings_preview"].append(uni_name)
+
+    # Clean internal state
+    for g in groups.values():
+        del g["_uni_names"]
+
+    return sorted(groups.values(), key=lambda g: g["course_group_name"])
+
+
+@app.get("/api/py/course-groups")
+def course_groups(query: Optional[str] = None):
+    """Returns deduped 'every course once' catalog."""
+    df = load_df()
+    all_groups = _build_course_groups(df)
+    if query:
+        ql = query.lower()
+        all_groups = [
+            g for g in all_groups
+            if ql in g["course_group_name"].lower()
+            or (g.get("representative_faculty") and ql in g["representative_faculty"].lower())
+        ]
+    return all_groups
+
+
+@app.get("/api/py/course-groups/{course_group_key}")
+def course_group_detail(course_group_key: str):
+    """Returns group detail + list of offerings (unis offering the course)."""
+    df = load_df()
+    all_groups = _build_course_groups(df)
+    group = next((g for g in all_groups if g["course_group_key"] == course_group_key), None)
+    if not group:
+        raise HTTPException(status_code=404, detail=f"Course group not found: {course_group_key}")
+
+    # Find matching offerings
+    offerings = []
+    for _, row in df.iterrows():
+        raw_name = clean_str(row.get("course_name", ""))
+        canonical = _canonical_course_name(raw_name)
+        key = normalize_course_key(canonical)
+        if key != course_group_key:
+            continue
+
+        uid = clean_str(row.get("university_id", ""))
+        cid = clean_str(row.get("course_id", ""))
+
+        offerings.append({
+            "course_id": cid,
+            "uni_code": uid,
+            "uni_name": UNIVERSITY_NAME_MAP.get(uid, uid),
+            "faculty": clean_str(row.get("faculty", "")),
+            "course_name": raw_name,
+            "degree_type": clean_str(row.get("degree_type", "")),
+            "course_url": clean_str(row.get("course_url", "")),
+            "typical_offer": clean_str(row.get("typical_offer", "")),
+            "min_requirements": clean_str(row.get("min_requirements", "")),
+            "min_points_home": to_int(row.get("min_points_home")),
+            "intl_buffer_points": to_int(row.get("intl_buffer_points")),
+            "required_subjects": clean_str(row.get("required_subjects", "")),
+            "recommended_subjects": clean_str(row.get("recommended_subjects", "")),
+            "ps_expected_signals": clean_str(row.get("ps_expected_signals", "")),
+            "estimated_annual_cost_international": to_money(row.get("estimated_annual_cost_international")),
+            "notes": clean_str(row.get("notes", "")),
+        })
+
+    return {**group, "offerings": offerings}
+
+
+@app.get("/api/py/offerings")
+def offerings_list(uni_code: Optional[str] = None, query: Optional[str] = None):
+    """Returns offerings filtered by uni_code and/or query."""
+    df = load_df()
+    view = df.copy()
+
+    if uni_code:
+        view = view[view["university_id"].astype(str).str.upper() == uni_code.upper()]
+    if query:
+        ql = query.lower()
+        name_mask = view["course_name"].astype(str).str.lower().str.contains(ql, na=False)
+        fac_mask = view["faculty"].astype(str).str.lower().str.contains(ql, na=False) if "faculty" in view.columns else pd.Series(False, index=view.index)
+        view = view[name_mask | fac_mask]
+
+    results = []
+    for _, row in view.iterrows():
+        uid = clean_str(row.get("university_id", ""))
+        results.append({
+            "course_id": clean_str(row.get("course_id", "")),
+            "uni_code": uid,
+            "uni_name": UNIVERSITY_NAME_MAP.get(uid, uid),
+            "faculty": clean_str(row.get("faculty", "")),
+            "course_name": clean_str(row.get("course_name", "")),
+            "degree_type": clean_str(row.get("degree_type", "")),
+            "course_url": clean_str(row.get("course_url", "")),
+            "typical_offer": clean_str(row.get("typical_offer", "")),
+            "min_requirements": clean_str(row.get("min_requirements", "")),
+            "min_points_home": to_int(row.get("min_points_home")),
+            "intl_buffer_points": to_int(row.get("intl_buffer_points")),
+            "required_subjects": clean_str(row.get("required_subjects", "")),
+            "recommended_subjects": clean_str(row.get("recommended_subjects", "")),
+            "ps_expected_signals": clean_str(row.get("ps_expected_signals", "")),
+            "estimated_annual_cost_international": to_money(row.get("estimated_annual_cost_international")),
+            "notes": clean_str(row.get("notes", "")),
+        })
+
+    return results
+
+
+@app.get("/api/py/offerings/{course_id}")
+def offering_detail(course_id: str):
+    """Returns single offering detail (all CSV fields)."""
+    row = get_row(course_id)
+    uid = clean_str(row.get("university_id", ""))
+    return {
+        "course_id": clean_str(row.get("course_id", "")),
+        "uni_code": uid,
+        "uni_name": UNIVERSITY_NAME_MAP.get(uid, uid),
+        "faculty": clean_str(row.get("faculty", "")),
+        "course_name": clean_str(row.get("course_name", "")),
+        "degree_type": clean_str(row.get("degree_type", "")),
+        "course_url": clean_str(row.get("course_url", "")),
+        "typical_offer": clean_str(row.get("typical_offer", "")),
+        "min_requirements": clean_str(row.get("min_requirements", "")),
+        "min_points_home": to_int(row.get("min_points_home")),
+        "intl_buffer_points": to_int(row.get("intl_buffer_points")),
+        "required_subjects": clean_str(row.get("required_subjects", "")),
+        "recommended_subjects": clean_str(row.get("recommended_subjects", "")),
+        "ps_expected_signals": clean_str(row.get("ps_expected_signals", "")),
+        "estimated_annual_cost_international": to_money(row.get("estimated_annual_cost_international")),
+        "notes": clean_str(row.get("notes", "")),
+    }
+
+
+# ── Recommend (Explorer Clarity Session) ─────────────────────────
+
+class RecommendPreferences(BaseModel):
+    optimize_for: str = "BALANCE"
+    vibe: List[str] = []
+    location: List[str] = []
+    interests: List[str] = []
+    free_text: Optional[str] = None
+
+
+class RecommendRequest(BaseModel):
+    curriculum: str
+    home_or_intl: str = "INTL"
+    predicted_summary: Optional[str] = None
+    ib_total_points: Optional[int] = None
+    preferences: RecommendPreferences
+
+
+# Location keywords
+LOCATION_MAP = {
+    "LONDON": {"KCL", "UCL", "LSE", "IMP"},
+    "BIG CITY": {"KCL", "UCL", "LSE", "IMP", "MAN", "EDIN", "BRIS"},
+    "FLEXIBLE": set(),  # no filter
+}
+
+
+def _score_offering(row: Dict[str, Any], prefs: RecommendPreferences) -> Tuple[int, List[str]]:
+    """Deterministic scoring: interest match + location + vibe + cost."""
+    score = 50
+    reasons: List[str] = []
+
+    course_name = clean_str(row.get("course_name", "")).lower()
+    faculty = clean_str(row.get("faculty", "")).lower()
+    ps_signals = clean_str(row.get("ps_expected_signals", "")).lower()
+    notes = clean_str(row.get("notes", "")).lower()
+    searchable = f"{course_name} {faculty} {ps_signals} {notes}"
+
+    # Interest matching
+    interest_hits = 0
+    for interest in prefs.interests:
+        il = interest.lower()
+        if il in searchable:
+            interest_hits += 1
+    if interest_hits > 0:
+        score += min(interest_hits * 12, 35)
+        reasons.append(f"Matches {interest_hits} of your interests")
+
+    # Location filter
+    uid = clean_str(row.get("university_id", "")).upper()
+    for loc in prefs.location:
+        loc_unis = LOCATION_MAP.get(loc, set())
+        if loc_unis and uid in loc_unis:
+            score += 8
+            reasons.append(f"{UNIVERSITY_NAME_MAP.get(uid, uid)} is in {loc.lower()}")
+            break
+
+    # Cost / prestige
+    cost = to_money(row.get("estimated_annual_cost_international"))
+    if prefs.optimize_for == "BUDGET" and cost is not None:
+        if cost < 25000:
+            score += 10
+            reasons.append("Lower annual fees for international students")
+        elif cost > 35000:
+            score -= 5
+    elif prefs.optimize_for == "PRESTIGE":
+        prestige_unis = {"OXF", "CAM", "LSE", "IMP", "UCL"}
+        if uid in prestige_unis:
+            score += 12
+            reasons.append(f"{UNIVERSITY_NAME_MAP.get(uid, uid)} is a top-ranked institution")
+
+    # Ensure at least one reason
+    if not reasons:
+        reasons.append("Broad curriculum match")
+
+    return min(max(score, 10), 99), reasons
+
+
+@app.post("/api/py/recommend")
+async def recommend(payload: RecommendRequest):
+    """
+    Explorer Clarity Session: returns ranked offering recommendations
+    grounded in CSV data, scored by interest + preferences.
+    """
+    tid = uuid.uuid4().hex[:8]
+    df = load_df()
+    prefs = payload.preferences
+
+    # Score every offering
+    scored: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        rd = row.to_dict()
+        fit, reasons = _score_offering(rd, prefs)
+
+        # Location filter: skip if doesn't match
+        if prefs.location and "FLEXIBLE" not in prefs.location:
+            uid = clean_str(rd.get("university_id", "")).upper()
+            in_location = any(uid in LOCATION_MAP.get(loc, set()) for loc in prefs.location)
+            if not in_location:
+                continue
+
+        scored.append({
+            "course_id": clean_str(rd.get("course_id", "")),
+            "uni_name": UNIVERSITY_NAME_MAP.get(
+                clean_str(rd.get("university_id", "")).upper(),
+                clean_str(rd.get("university_id", ""))
+            ),
+            "course_name": clean_str(rd.get("course_name", "")),
+            "degree_type": clean_str(rd.get("degree_type", "")),
+            "faculty": clean_str(rd.get("faculty", "")),
+            "fit_score": fit,
+            "reasons": reasons[:3],
+            "typical_offer": clean_str(rd.get("typical_offer", "")),
+            "estimated_annual_cost_international": to_money(rd.get("estimated_annual_cost_international")),
+        })
+
+    # Sort by fit_score desc, take top 12
+    scored.sort(key=lambda x: x["fit_score"], reverse=True)
+    top = scored[:12]
+
+    return {
+        "status": "ok",
+        "recommendations": top,
+        "provider_meta": {"latency_ms": 0},
+    }

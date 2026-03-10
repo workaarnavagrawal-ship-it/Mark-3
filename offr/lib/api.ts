@@ -1,15 +1,21 @@
 import type {
   CourseDetail,
   CourseListItem,
+  CourseGroup,
+  CourseGroupDetail,
   DashboardInsightsRequest,
   DashboardInsightsResponse,
+  ExplorerPrefs,
   OfferAssessRequest,
   OfferAssessResponse,
+  Offering,
   PortfolioAdviceRequest,
   PortfolioAdviceResponse,
+  RecommendResult,
   SuggestRequest,
   SuggestResponse,
   UniversityItem,
+  UniversityWithCount,
   UniqueCourse,
   UniqueCourseDetail,
   ShortlistedCourse,
@@ -179,3 +185,50 @@ export const removeShortlistedCourse = (course_key: string) =>
   shortlistFetch<{ success: true }>(`/api/shortlist/${encodeURIComponent(course_key)}`, {
     method: "DELETE",
   });
+
+// ── Recommend (Explorer Clarity Session) ─────────────────────────
+export interface RecommendRequest {
+  curriculum: string;
+  home_or_intl: string;
+  predicted_summary?: string | null;
+  ib_total_points?: number | null;
+  preferences: ExplorerPrefs;
+}
+
+export interface RecommendResponse {
+  status: "ok" | "error";
+  recommendations: RecommendResult[];
+  provider_meta?: { latency_ms: number };
+  error_code?: string;
+  message?: string;
+  retryable?: boolean;
+}
+
+export const postRecommend = (body: RecommendRequest) =>
+  apiFetch<RecommendResponse>("/recommend", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+// ── V2 data endpoints (spec-aligned) ────────────────────────────
+
+export const getUniversitiesV2 = () =>
+  apiFetch<UniversityWithCount[]>("/universities");
+
+export const getCourseGroups = (query?: string) =>
+  apiFetch<CourseGroup[]>(`/course-groups${query ? `?query=${encodeURIComponent(query)}` : ""}`);
+
+export const getCourseGroupDetail = (key: string) =>
+  apiFetch<CourseGroupDetail>(`/course-groups/${encodeURIComponent(key)}`);
+
+export const getOfferings = (uniCode?: string, query?: string) => {
+  const params = new URLSearchParams();
+  if (uniCode) params.set("uni_code", uniCode);
+  if (query) params.set("query", query);
+  const qs = params.toString();
+  return apiFetch<Offering[]>(`/offerings${qs ? `?${qs}` : ""}`);
+};
+
+export const getOfferingDetail = (courseId: string) =>
+  apiFetch<Offering>(`/offerings/${encodeURIComponent(courseId)}`);
